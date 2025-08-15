@@ -1,3 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_URL")
+}
+
+model User {
+  id        String     @id @default(cuid())
+  email     String     @unique
+  name      String?
+  role      UserRole   @default(EMPLOYEE)
+  salary    Float?
+  status    UserStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  casinos Casino[]
+
+  @@map("users")
+}
+
+model Casino {
+  id          String   @id @default(cuid())
+  name        String
+  rating      Float
+  bonus       String?
+  description String?
+  logoUrl     String?
+  referralUrl String?
+  authorId    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  author User             @relation(fields: [authorId], references: [id])
+  clicks ReferralClick[]
+
+  @@map("casinos")
+}
+
+model ReferralClick {
+  id        String   @id @default(cuid())
+  casinoId  String
+  userAgent String?
+  ipAddress String?
+  country   String?
+  revenue   Float?   @default(0)
+  clickedAt DateTime @default(now())
+
+  // Relations
+  casino Casino @relation(fields: [casinoId], references: [id])
+
+  @@map("referral_clicks")
+}
+
+model Newsletter {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  subscribedAt DateTime @default(now())
+  isActive     Boolean  @default(true)
+
+  @@map("newsletter")
+}
+
+model Partnership {
+  id          String            @id @default(cuid())
+  companyName String
+  email       String
+  website     String?
+  message     String
+  status      PartnershipStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@map("partnerships")
+}
+
+model JobApplication {
+  id        String              @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  position  String
+  message   String
+  resumeUrl String?
+  status    ApplicationStatus   @default(PENDING)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@map("job_applications")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum PartnershipStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ApplicationStatus {
+  PENDING
+  REVIEWING
+  ACCEPTED
+  REJECTED
+}
+
 model Employee {
   id        String       @id @default(cuid())
   nickname  String       @unique
