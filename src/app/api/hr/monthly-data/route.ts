@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     const rate = monthlyData?.gbpUsdRate || 1.27
 
     // Calculate site profits
-    const siteProfits = {}
+    const siteProfits: Record<string, number> = {}
     
     // Process work data
     for (const work of workData) {
@@ -61,11 +61,11 @@ export async function GET(request: NextRequest) {
 
     // Sort sites by profit
     const sortedSites = Object.entries(siteProfits)
-      .sort(([,a], [,b]) => b - a)
-      .map(([site, profit]) => ({ site, profit }))
+      .sort(([,a], [,b]) => (b as number) - (a as number))
+      .map(([site, profit]) => ({ site, profit: profit as number }))
 
     // Calculate employee profits
-    const employeeProfits = {}
+    const employeeProfits: Record<string, number> = {}
     
     // Process work data for employee profits
     for (const work of workData) {
@@ -98,8 +98,8 @@ export async function GET(request: NextRequest) {
 
     // Sort employees by profit
     const sortedEmployees = Object.entries(employeeProfits)
-      .sort(([,a], [,b]) => b - a)
-      .map(([nickname, profit]) => ({ nickname, profit }))
+      .sort(([,a], [,b]) => (b as number) - (a as number))
+      .map(([nickname, profit]) => ({ nickname, profit: profit as number }))
 
     // Calculate total profit
     const totalProfit = sortedSites.reduce((sum, site) => sum + site.profit, 0)
