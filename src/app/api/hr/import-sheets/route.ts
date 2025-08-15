@@ -56,108 +56,216 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
   // Process each employee folder (@nickname)
   for (const folder of employeeFolders) {
     try {
-      const nickname = folder.name // e.g., @opporenno
-      console.log(`Processing employee folder: ${nickname}`)
+      const nickname = folder.name // e.g., @Artem_Sen
+      console.log(`\n=== Processing employee folder: ${nickname} ===`)
 
-      // Find WORK spreadsheet in employee folder
+      // Find WORK @nickname spreadsheet (exact pattern match)
+      const expectedWorkFileName = `WORK ${nickname}` // e.g., "WORK @Artem_Sen"
+      console.log(`Looking for work file: "${expectedWorkFileName}"`)
+
       const workFilesResponse = await drive.files.list({
-        q: `'${folder.id}' in parents and mimeType='application/vnd.google-apps.spreadsheet'`,
-        fields: 'files(id, name)'
+        q: `'${folder.id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and name='${expectedWorkFileName}'`,
+        fields: 'files(id, name, createdTime, modifiedTime)'
       })
 
-      const workFiles = workFilesResponse.data.files || []
-      console.log(`Found ${workFiles.length} spreadsheets in ${nickname} folder`)
-
-      // Look for WORK file (может быть просто "WORK" или "WORK @nickname")
-      let workFile = null
-      for (const file of workFiles) {
-        if (file.name.includes('WORK') || file.name.toLowerCase().includes('work')) {
-          workFile = file
-          break
-        }
+      let workFiles = workFilesResponse.data.files || []
+      
+      // If exact match not found, try broader search
+      if (workFiles.length === 0) {
+        console.log(`Exact match not found, searching for files containing "WORK" and "${nickname}"`)
+        
+        const broadSearchResponse = await drive.files.list({
+          q: `'${folder.id}' in parents and mimeType='application/vnd.google-apps.spreadsheet'`,
+          fields: 'files(id, name, createdTime, modifiedTime)'
+        })
+        
+        const allSpreadsheets = broadSearchResponse.data.files || []
+        console.log(`Found ${allSpreadsheets.length} spreadsheets in folder:`)
+        allSpreadsheets.forEach(file => console.log(`  - "${file.name}"`))
+        
+        // Filter for files that contain both WORK and the nickname
+        workFiles = allSpreadsheets.filter(file => 
+          file.name.includes('WORK') && 
+          file.name.includes(nickname.substring(1)) // Remove @ from nickname for comparison
+        )
       }
 
-      if (workFile) {
-        console.log(`Found work file: ${workFile.name} for ${nickname}`)
+      if (workFiles.length > 0) {
+        const workFile = workFiles[0] // Take the first matching file
+        console.log(`✅ Found work file: "${workFile.name}" for ${nickname}`)
 
-        // Get data from month sheet
+        // Get available sheets in the work file
         try {
-          console.log(`Trying to read ${month} sheet from ${workFile.name}`)
-          
-          const monthSheetData = await sheets.spreadsheets.values.get({
+          const spreadsheetInfo = await sheets.spreadsheets.get({
             spreadsheetId: workFile.id,
-            range: `${month}!A2:D1000` // A=Casino, B=Deposit, C=Withdrawal, D=Card
+            fields: 'sheets.properties.title'
           })
 
-          const rows = monthSheetData.data.values || []
-          console.log(`Found ${rows.length} data rows in ${month} sheet for ${nickname}`)
-          
-          for (const row of rows) {
-            if (row.length >= 3 && row[0] && row[0].toString().trim() !== '') { 
-              // Has casino name and not empty
-              const casino = row[0].toString().trim()
-              const deposit = parseFloat(row[1]) || 0
-              const withdrawal = parseFloat(row[2]) || 0
-              const card = row[3] ? row[3].toString().trim() : 'N/A'
+          const sheetNames = spreadsheetInfo.data.sheets?.map(sheet => sheet.properties.title) || []
+          console.log(`Available sheets in "${workFile.name}":`, sheetNames)
 
-              workData.push({
-                nickname: nickname,
-                casino: casino,
-                deposit: deposit,
-                withdrawal: withdrawal,
-                card: card
+          // Find the month sheet - try different variations
+          let targetSheet = null
+          const monthToFind = month.split(' ')[0] // Get just "August" from "August 2024"
+          
+          // Try exact match first
+          if (sheetNames.includes(monthToFind)) {
+            targetSheet = monthToFind
+          } 
+          // Try case insensitive match
+          else {
+            targetSheet = sheetNames.find(sheet => 
+              sheet.toLowerCase() === monthToFind.toLowerCase()
+            )
+          }
+          
+          // If still not found, try partial match
+          if (!targetSheet) {
+            targetSheet = sheetNames.find(sheet => 
+              sheet.toLowerCase().includes(monthToFind.toLowerCase())
+            )
+          }
+
+          if (targetSheet) {
+            console.log(`✅ Found month sheet: "${targetSheet}" in ${workFile.name}`)
+
+            try {
+              console.log(`Reading data from sheet "${targetSheet}"...`)
+              
+              const monthSheetData = await sheets.spreadsheets.values.get({
+                spreadsheetId: workFile.id,
+                range: `'${targetSheet}'!A2:D1000`
               })
 
-              console.log(`Added record: ${nickname} - ${casino} - ${deposit}/${withdrawal}`)
+              const rows = monthSheetData.data.values || []
+              console.log(`Found ${rows.length} total rows in "${targetSheet}"`)
+              
+              let validRows = 0
+              for (let i = 0; i < rows.length; i++) {
+                const row = rows[i]
+                
+                // Check if row has data (at least casino name)
+                if (row && row.length >= 1 && row[0] && row[0].toString().trim() !== '') {
+                  const casino = row[0].toString().trim()
+                  const deposit = row.length >= 2 ? (parseFloat(row[1]) || 0) : 0
+                  const withdrawal = row.length >= 3 ? (parseFloat(row[2]) || 0) : 0
+                  const card = row.length >= 4 && row[3] ? row[3].toString().trim() : 'N/A'
+
+                  // Skip header-like rows
+                  if (casino.toLowerCase() === 'casino' || 
+                      casino.toLowerCase() === 'site' ||
+                      casino.toLowerCase().includes('депозит') ||
+                      casino.toLowerCase().includes('deposit')) {
+                    continue
+                  }
+
+                  workData.push({
+                    nickname: nickname,
+                    casino: casino,
+                    deposit: deposit,
+                    withdrawal: withdrawal,
+                    card: card
+                  })
+
+                  validRows++
+                  if (validRows <= 5) { // Log first 5 records for debugging
+                    console.log(`  ➤ Row ${i + 2}: ${casino} | Deposit: ${deposit} | Withdrawal: ${withdrawal} | Card: ${card}`)
+                  }
+                }
+              }
+              console.log(`✅ Added ${validRows} valid records for ${nickname}`)
+              
+            } catch (readError) {
+              console.log(`❌ Error reading data from "${targetSheet}":`, readError.message)
             }
+          } else {
+            console.log(`❌ No sheet found for month "${monthToFind}" in ${workFile.name}`)
+            console.log(`Available sheets: ${sheetNames.join(', ')}`)
           }
-        } catch (sheetError) {
-          console.log(`No ${month} sheet found in ${workFile.name} for ${nickname}:`, sheetError.message)
+          
+        } catch (sheetListError) {
+          console.log(`❌ Error getting sheet list from ${workFile.name}:`, sheetListError.message)
         }
       } else {
-        console.log(`No WORK file found in ${nickname} folder`)
+        console.log(`❌ No WORK file found for ${nickname}`)
       }
     } catch (folderError) {
-      console.log(`Error processing folder ${folder.name}:`, folderError.message)
+      console.log(`❌ Error processing folder ${folder.name}:`, folderError.message)
     }
   }
 
   // Get test data from @sobroffice separate spreadsheet
   if (testSpreadsheetId) {
     try {
-      console.log('Fetching test data from separate spreadsheet...')
-      const testSheetData = await sheets.spreadsheets.values.get({
+      console.log('\n=== Fetching test data from separate spreadsheet ===')
+      
+      const testSpreadsheetInfo = await sheets.spreadsheets.get({
         spreadsheetId: testSpreadsheetId,
-        range: `${month}!A2:D1000`
+        fields: 'sheets.properties.title'
       })
 
-      const testRows = testSheetData.data.values || []
-      console.log(`Found ${testRows.length} test data rows`)
-      
-      for (const row of testRows) {
-        if (row.length >= 3 && row[0] && row[0].toString().trim() !== '') {
-          const casino = row[0].toString().trim()
-          const deposit = parseFloat(row[1]) || 0
-          const withdrawal = parseFloat(row[2]) || 0
-          const card = row[3] ? row[3].toString().trim() : 'N/A'
+      const testSheetNames = testSpreadsheetInfo.data.sheets?.map(sheet => sheet.properties.title) || []
+      console.log(`Available sheets in test spreadsheet:`, testSheetNames)
 
-          testData.push({
-            nickname: '@sobroffice',
-            casino: casino,
-            deposit: deposit,
-            withdrawal: withdrawal,
-            card: card
-          })
+      const monthToFind = month.split(' ')[0] // "August"
+      let testTargetSheet = testSheetNames.find(sheet => 
+        sheet.toLowerCase() === monthToFind.toLowerCase() ||
+        sheet.toLowerCase().includes(monthToFind.toLowerCase())
+      )
 
-          console.log(`Added test record: @sobroffice - ${casino} - ${deposit}/${withdrawal}`)
+      if (testTargetSheet) {
+        console.log(`✅ Found test month sheet: "${testTargetSheet}"`)
+        
+        const testSheetData = await sheets.spreadsheets.values.get({
+          spreadsheetId: testSpreadsheetId,
+          range: `'${testTargetSheet}'!A2:D1000`
+        })
+
+        const testRows = testSheetData.data.values || []
+        console.log(`Found ${testRows.length} test data rows`)
+        
+        let validTestRows = 0
+        for (const row of testRows) {
+          if (row && row.length >= 1 && row[0] && row[0].toString().trim() !== '') {
+            const casino = row[0].toString().trim()
+            
+            // Skip headers
+            if (casino.toLowerCase() === 'casino' || casino.toLowerCase() === 'site') {
+              continue
+            }
+            
+            const deposit = row.length >= 2 ? (parseFloat(row[1]) || 0) : 0
+            const withdrawal = row.length >= 3 ? (parseFloat(row[2]) || 0) : 0
+            const card = row.length >= 4 && row[3] ? row[3].toString().trim() : 'N/A'
+
+            testData.push({
+              nickname: '@sobroffice',
+              casino: casino,
+              deposit: deposit,
+              withdrawal: withdrawal,
+              card: card
+            })
+
+            validTestRows++
+            if (validTestRows <= 3) {
+              console.log(`  ➤ Test record: ${casino} - ${deposit}/${withdrawal}`)
+            }
+          }
         }
+        console.log(`✅ Added ${validTestRows} test records`)
+      } else {
+        console.log(`❌ No test sheet found for month "${monthToFind}"`)
       }
     } catch (testError) {
-      console.log('Error fetching test data:', testError.message)
+      console.log('❌ Error fetching test data:', testError.message)
     }
   }
 
-  console.log(`Import completed: ${workData.length} work records, ${testData.length} test records`)
+  console.log(`\n=== Import Summary ===`)
+  console.log(`Work records: ${workData.length}`)
+  console.log(`Test records: ${testData.length}`)
+  console.log(`Total: ${workData.length + testData.length}`)
+  
   return { workData, testData, rate }
 }
 
@@ -347,8 +455,8 @@ export async function POST(request: NextRequest) {
 
 👥 Сотрудники: ${processedData.employees.join(', ')}
 
-💰 Общая прибыль:
-${processedData.workRecords.map(r => `${r.employee}: ${r.casino} (${r.profit > 0 ? '+' : ''}${r.profit.toFixed(2)})`).join('\n').substring(0, 500)}${processedData.workRecords.length > 10 ? '\n...' : ''}`
+💰 Прибыли по сотрудникам:
+${processedData.workRecords.slice(0, 10).map(r => `${r.employee}: ${r.casino} (${r.profit > 0 ? '+' : ''}${r.profit.toFixed(2)})`).join('\n')}${processedData.workRecords.length > 10 ? '\n...' : ''}`
 
     return NextResponse.json({
       success: true,
