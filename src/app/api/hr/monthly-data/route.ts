@@ -1,4 +1,3 @@
-// src/app/api/hr/monthly-data/route.ts
 import { NextResponse, NextRequest } from 'next/server'
 import { prisma } from '../../../../../lib/prisma'
 
