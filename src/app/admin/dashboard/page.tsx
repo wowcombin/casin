@@ -66,37 +66,59 @@ export default function AdminDashboard() {
 
   const calculateProfits = async () => {
     try {
+      setLoading(true)
+      
+      const currentDate = new Date()
+      const currentMonth = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      
+      console.log('Calculating profits for:', currentMonth)
+      
       const response = await fetch('/api/hr/calculate-profits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: 'December 2024' })
+        body: JSON.stringify({ month: currentMonth })
       })
       
-      if (response.ok) {
-        alert('Прибыль рассчитана успешно!')
+      const result = await response.json()
+      
+      if (result.success) {
+        const data = result.data
+        alert(`✅ Прибыль рассчитана!\n\nМесяц: ${data.month}\nКурс: ${data.rate}\nОбщая база: $${data.totalBase}\nОбщая прибыль: $${data.totalProfit}\n\n${data.message}`)
       } else {
-        alert('Ошибка при расчете прибыли')
+        alert('❌ Ошибка при расчете: ' + result.error)
       }
+      
     } catch (error) {
-      alert('Ошибка при расчете прибыли')
+      console.error('Calculation error:', error)
+      alert('❌ Ошибка при расчете прибыли')
+    } finally {
+      setLoading(false)
     }
   }
 
   const calculateMonthlyProfits = async (month: string) => {
     try {
+      setLoading(true)
+      
       const response = await fetch('/api/hr/calculate-profits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ month })
       })
       
-      if (response.ok) {
-        alert(`Прибыль за ${month} рассчитана успешно!`)
+      const result = await response.json()
+      
+      if (result.success) {
+        const data = result.data
+        alert(`✅ Прибыль за ${month} рассчитана!\n\nКурс: ${data.rate}\nОбщая база: $${data.totalBase}\nОбщая прибыль: $${data.totalProfit}`)
       } else {
-        alert('Ошибка при расчете прибыли')
+        alert('❌ Ошибка при расчете: ' + result.error)
       }
     } catch (error) {
-      alert('Ошибка при расчете прибыли')
+      console.error('Monthly calculation error:', error)
+      alert('❌ Ошибка при расчете прибыли')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -107,8 +129,42 @@ export default function AdminDashboard() {
     }
   }
 
-  const importFromSheets = () => {
-    alert('Функция импорта из Google Sheets будет реализована')
+  const importFromSheets = async () => {
+    try {
+      setLoading(true)
+      
+      // Get current month for import
+      const currentDate = new Date()
+      const currentMonth = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      
+      console.log('Starting import for:', currentMonth)
+      
+      const response = await fetch('/api/hr/import-sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          month: currentMonth,
+          spreadsheetId: '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu' // Your Junior folder ID
+        })
+      })
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        alert(`✅ Импорт завершен!\n\n${result.data.message}\n\nИмпортировано: ${result.data.imported} записей\nСотрудники: ${result.data.employees.length}\nРабочие записи: ${result.data.workRecords.length}\nТестовые записи: ${result.data.testRecords.length}`)
+        
+        // Refresh dashboard data
+        initDashboard()
+      } else {
+        alert('❌ Ошибка при импорте: ' + result.error)
+      }
+      
+    } catch (error) {
+      console.error('Import error:', error)
+      alert('❌ Ошибка при импорте данных')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const exportReport = () => {
@@ -264,9 +320,10 @@ export default function AdminDashboard() {
             <div className="space-x-2">
               <button 
                 onClick={() => calculateProfits()}
-                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                disabled={loading}
+                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
               >
-                Рассчитать Прибыль
+                {loading ? 'Расчет...' : 'Рассчитать Прибыль'}
               </button>
               <button 
                 onClick={() => addEmployee()}
@@ -327,20 +384,22 @@ export default function AdminDashboard() {
               <p className="text-sm text-blue-700 mb-3">Запустить автоматический расчет прибыли за месяц</p>
               <button 
                 onClick={() => calculateMonthlyProfits('December 2024')}
-                className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                disabled={loading}
+                className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
               >
-                Рассчитать за Декабрь
+                {loading ? 'Расчет...' : 'Рассчитать за Декабрь'}
               </button>
             </div>
 
             <div className="bg-green-50 p-4 rounded-lg">
               <h4 className="text-md font-medium text-green-900 mb-2">Импорт Данных</h4>
-              <p className="text-sm text-green-700 mb-3">Загрузить данные из Google Sheets</p>
+              <p className="text-sm text-green-700 mb-3">Загрузить данные из Google Sheets (как ваши скрипты)</p>
               <button 
                 onClick={() => importFromSheets()}
-                className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                disabled={loading}
+                className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50"
               >
-                Импортировать
+                {loading ? 'Импорт...' : 'Импортировать'}
               </button>
             </div>
 
@@ -349,7 +408,8 @@ export default function AdminDashboard() {
               <p className="text-sm text-purple-700 mb-3">Создать отчет по всем сотрудникам</p>
               <button 
                 onClick={() => exportReport()}
-                className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700"
+                disabled={loading}
+                className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 disabled:opacity-50"
               >
                 Скачать Отчет
               </button>
@@ -385,6 +445,45 @@ export default function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button className="text-green-600 hover:text-green-900 mr-2">Approve</button>
+                      <button className="text-red-600 hover:text-red-900">Reject</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <h4 className="text-md font-medium text-gray-700 mb-4">Job Applications</h4>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Position</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {data.jobApplications.map((application: any) => (
+                  <tr key={application.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{application.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{application.email}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{application.position}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        application.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {application.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <button className="text-green-600 hover:text-green-900 mr-2">Accept</button>
                       <button className="text-red-600 hover:text-red-900">Reject</button>
                     </td>
                   </tr>
