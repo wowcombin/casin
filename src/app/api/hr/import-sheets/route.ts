@@ -35,87 +35,121 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
     throw new Error('Junior folder ID not configured')
   }
 
-  console.log('Fetching Junior folders...')
+  console.log('Fetching employee folders from Junior directory...')
 
-  // Get all subfolders in Junior folder
+  // Get all subfolders in Junior folder that start with @
   const foldersResponse = await drive.files.list({
     q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
     fields: 'files(id, name)'
   })
 
-  const juniorFolders = foldersResponse.data.files || []
-  console.log(`Found ${juniorFolders.length} junior folders`)
+  const allFolders = foldersResponse.data.files || []
+  console.log(`Found ${allFolders.length} total folders`)
+
+  // Filter folders that start with @
+  const employeeFolders = allFolders.filter(folder => folder.name.startsWith('@'))
+  console.log(`Found ${employeeFolders.length} employee folders starting with @`)
 
   const workData = []
   const testData = []
 
-  // Process each junior folder
-  for (const folder of juniorFolders) {
+  // Process each employee folder (@nickname)
+  for (const folder of employeeFolders) {
     try {
-      const nickname = folder.name.replace('WORK @', '')
-      console.log(`Processing folder: ${nickname}`)
+      const nickname = folder.name // e.g., @opporenno
+      console.log(`Processing employee folder: ${nickname}`)
 
-      // Find WORK spreadsheet in folder
+      // Find WORK spreadsheet in employee folder
       const workFilesResponse = await drive.files.list({
-        q: `'${folder.id}' in parents and name contains 'WORK @'`,
+        q: `'${folder.id}' in parents and mimeType='application/vnd.google-apps.spreadsheet'`,
         fields: 'files(id, name)'
       })
 
       const workFiles = workFilesResponse.data.files || []
-      
-      if (workFiles.length > 0) {
-        const workFile = workFiles[0]
-        console.log(`Found work file: ${workFile.name}`)
+      console.log(`Found ${workFiles.length} spreadsheets in ${nickname} folder`)
+
+      // Look for WORK file (может быть просто "WORK" или "WORK @nickname")
+      let workFile = null
+      for (const file of workFiles) {
+        if (file.name.includes('WORK') || file.name.toLowerCase().includes('work')) {
+          workFile = file
+          break
+        }
+      }
+
+      if (workFile) {
+        console.log(`Found work file: ${workFile.name} for ${nickname}`)
 
         // Get data from month sheet
         try {
+          console.log(`Trying to read ${month} sheet from ${workFile.name}`)
+          
           const monthSheetData = await sheets.spreadsheets.values.get({
             spreadsheetId: workFile.id,
-            range: `${month}!A2:D1000` // Casino, Deposit, Withdrawal, Card
+            range: `${month}!A2:D1000` // A=Casino, B=Deposit, C=Withdrawal, D=Card
           })
 
           const rows = monthSheetData.data.values || []
+          console.log(`Found ${rows.length} data rows in ${month} sheet for ${nickname}`)
           
           for (const row of rows) {
-            if (row.length >= 3 && row[0]) { // Has casino name
+            if (row.length >= 3 && row[0] && row[0].toString().trim() !== '') { 
+              // Has casino name and not empty
+              const casino = row[0].toString().trim()
+              const deposit = parseFloat(row[1]) || 0
+              const withdrawal = parseFloat(row[2]) || 0
+              const card = row[3] ? row[3].toString().trim() : 'N/A'
+
               workData.push({
-                nickname: '@' + nickname,
-                casino: row[0] || 'Unknown',
-                deposit: parseFloat(row[1]) || 0,
-                withdrawal: parseFloat(row[2]) || 0,
-                card: row[3] || 'N/A'
+                nickname: nickname,
+                casino: casino,
+                deposit: deposit,
+                withdrawal: withdrawal,
+                card: card
               })
+
+              console.log(`Added record: ${nickname} - ${casino} - ${deposit}/${withdrawal}`)
             }
           }
         } catch (sheetError) {
-          console.log(`No ${month} sheet found in ${workFile.name}`)
+          console.log(`No ${month} sheet found in ${workFile.name} for ${nickname}:`, sheetError.message)
         }
+      } else {
+        console.log(`No WORK file found in ${nickname} folder`)
       }
     } catch (folderError) {
       console.log(`Error processing folder ${folder.name}:`, folderError.message)
     }
   }
 
-  // Get test data from @sobroffice
+  // Get test data from @sobroffice separate spreadsheet
   if (testSpreadsheetId) {
     try {
-      console.log('Fetching test data...')
+      console.log('Fetching test data from separate spreadsheet...')
       const testSheetData = await sheets.spreadsheets.values.get({
         spreadsheetId: testSpreadsheetId,
         range: `${month}!A2:D1000`
       })
 
       const testRows = testSheetData.data.values || []
+      console.log(`Found ${testRows.length} test data rows`)
       
       for (const row of testRows) {
-        if (row.length >= 3 && row[0]) {
+        if (row.length >= 3 && row[0] && row[0].toString().trim() !== '') {
+          const casino = row[0].toString().trim()
+          const deposit = parseFloat(row[1]) || 0
+          const withdrawal = parseFloat(row[2]) || 0
+          const card = row[3] ? row[3].toString().trim() : 'N/A'
+
           testData.push({
             nickname: '@sobroffice',
-            casino: row[0] || 'Unknown',
-            deposit: parseFloat(row[1]) || 0,
-            withdrawal: parseFloat(row[2]) || 0,
-            card: row[3] || 'N/A'
+            casino: casino,
+            deposit: deposit,
+            withdrawal: withdrawal,
+            card: card
           })
+
+          console.log(`Added test record: @sobroffice - ${casino} - ${deposit}/${withdrawal}`)
         }
       }
     } catch (testError) {
@@ -123,6 +157,7 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
     }
   }
 
+  console.log(`Import completed: ${workData.length} work records, ${testData.length} test records`)
   return { workData, testData, rate }
 }
 
@@ -211,10 +246,32 @@ async function processAndSaveData(importResult: any, month: string) {
       }
     })
 
+    console.log(`Successfully saved ${totalProcessed} records to database`)
+
   } catch (dbError) {
     console.log('Database save error:', dbError.message)
+    console.log('Continuing with demo data calculation...')
     // Continue with demo data if DB fails
     totalProcessed = workData.length + testData.length
+    
+    // Create employees list from imported data
+    for (const work of workData) {
+      if (!employees.includes(work.nickname)) {
+        employees.push(work.nickname)
+      }
+      workRecords.push({
+        employee: work.nickname,
+        casino: work.casino,
+        profit: (work.withdrawal - work.deposit)
+      })
+    }
+
+    for (const test of testData) {
+      testRecords.push({
+        casino: test.casino,
+        profit: (test.withdrawal - test.deposit)
+      })
+    }
   }
 
   return {
@@ -256,6 +313,20 @@ export async function POST(request: NextRequest) {
     const drive = google.drive({ version: 'v3', auth })
     const sheets = google.sheets({ version: 'v4', auth })
 
+    // Test API access first
+    try {
+      await drive.files.get({ fileId: process.env.GOOGLE_JUNIOR_FOLDER_ID! })
+      console.log('Google Drive access confirmed')
+    } catch (accessError) {
+      console.error('Google Drive access error:', accessError.message)
+      return NextResponse.json({
+        success: false,
+        error: 'No access to Google Drive folder. Please check permissions.',
+        needsAuth: true,
+        authUrl: '/api/auth/google'
+      })
+    }
+
     // Get current GBP/USD rate
     const rate = await getCurrentExchangeRate()
 
@@ -265,13 +336,27 @@ export async function POST(request: NextRequest) {
     // Process and save to database
     const processedData = await processAndSaveData(importResult, month)
 
+    const detailedMessage = `✅ Импорт завершен для ${month}!
+
+📊 Статистика:
+- Обработано записей: ${processedData.totalProcessed}
+- Рабочих записей: ${processedData.workDataCount}
+- Тестовых записей: ${processedData.testDataCount}
+- Сотрудников: ${processedData.employees.length}
+- Курс GBP/USD: ${rate}
+
+👥 Сотрудники: ${processedData.employees.join(', ')}
+
+💰 Общая прибыль:
+${processedData.workRecords.map(r => `${r.employee}: ${r.casino} (${r.profit > 0 ? '+' : ''}${r.profit.toFixed(2)})`).join('\n').substring(0, 500)}${processedData.workRecords.length > 10 ? '\n...' : ''}`
+
     return NextResponse.json({
       success: true,
       data: {
         month,
         rate,
         ...processedData,
-        message: `✅ Импорт завершен для ${month}!\n\nОбработано: ${processedData.totalProcessed} записей\nРабота: ${processedData.workDataCount} записей\nТесты: ${processedData.testDataCount} записей\nСотрудники: ${processedData.employees.length}`
+        message: detailedMessage
       }
     })
 
@@ -284,6 +369,14 @@ export async function POST(request: NextRequest) {
         error: 'Google authentication expired. Please re-authenticate.',
         needsAuth: true,
         authUrl: '/api/auth/google'
+      })
+    }
+
+    if (error.message?.includes('Folder not found') || error.message?.includes('not configured')) {
+      return NextResponse.json({
+        success: false,
+        error: 'Google Drive folder not found or not configured properly.',
+        needsSetup: true
       })
     }
 
@@ -326,23 +419,40 @@ export async function GET(request: NextRequest) {
       const auth = getGoogleAuth(accessToken)
       const drive = google.drive({ version: 'v3', auth })
       
-      await drive.files.get({ fileId: process.env.GOOGLE_JUNIOR_FOLDER_ID! })
+      // Test folder access
+      const folderInfo = await drive.files.get({ 
+        fileId: process.env.GOOGLE_JUNIOR_FOLDER_ID!,
+        fields: 'id,name,parents'
+      })
+      
+      // Test listing folders
+      const foldersResponse = await drive.files.list({
+        q: `'${process.env.GOOGLE_JUNIOR_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder'`,
+        fields: 'files(id, name)'
+      })
+
+      const employeeFolders = foldersResponse.data.files?.filter(folder => folder.name?.startsWith('@')) || []
       
       return NextResponse.json({
         success: true,
         data: {
           status: 'authenticated',
-          message: 'Google Drive доступ настроен и готов к работе'
+          message: `Google Drive готов к работе. Найдено ${employeeFolders.length} папок сотрудников.`,
+          folderName: folderInfo.data.name,
+          employeeFolders: employeeFolders.length,
+          employees: employeeFolders.map(f => f.name).slice(0, 5) // First 5 for preview
         }
       })
     } catch (apiError) {
+      console.error('Google API test error:', apiError.message)
       return NextResponse.json({
         success: false,
         data: {
           status: 'access_denied',
-          message: 'Нет доступа к Google Drive папке',
+          message: 'Нет доступа к Google Drive папке. Проверьте права доступа.',
           needsAuth: true,
-          authUrl: '/api/auth/google'
+          authUrl: '/api/auth/google',
+          error: apiError.message
         }
       })
     }
