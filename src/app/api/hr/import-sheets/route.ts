@@ -1,9 +1,25 @@
 import { NextResponse, NextRequest } from 'next/server'
 import { prisma } from '../../../../../lib/prisma'
+import { google } from 'googleapis'
+
+// Initialize Google APIs with OAuth tokens
+function getGoogleAuth(accessToken: string) {
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  )
+
+  oauth2Client.setCredentials({
+    access_token: accessToken
+  })
+
+  return oauth2Client
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const { month, spreadsheetId } = await request.json()
+    const { month } = await request.json()
     
     if (!month) {
       return NextResponse.json(
@@ -12,238 +28,121 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log(`Starting import for month: ${month}`)
+    // Get access token from cookies
+    const accessToken = request.cookies.get('google_access_token')?.value
 
-    // Simulate Google Sheets import (demo version)
-    // In real implementation, you would use googleapis to fetch data
-    const simulatedData = await simulateGoogleSheetsImport(month, spreadsheetId)
+    if (!accessToken) {
+      return NextResponse.json({
+        success: false,
+        error: 'Google authentication required',
+        needsAuth: true,
+        authUrl: '/api/auth/google'
+      })
+    }
 
-    // Process the imported data
-    const processedData = await processImportedData(simulatedData, month)
+    console.log(`Starting Google Drive import for month: ${month}`)
+
+    const auth = getGoogleAuth(accessToken)
+    const drive = google.drive({ version: 'v3', auth })
+    const sheets = google.sheets({ version: 'v4', auth })
+
+    // Get current GBP/USD rate
+    const rate = await getCurrentExchangeRate()
+
+    // Import from Google Drive
+    const importResult = await importFromGoogleDrive(drive, sheets, month, rate)
+
+    // Process and save to database
+    const processedData = await processAndSaveData(importResult, month)
 
     return NextResponse.json({
       success: true,
       data: {
         month,
-        imported: processedData.imported,
-        employees: processedData.employees,
-        workRecords: processedData.workRecords,
-        testRecords: processedData.testRecords,
-        message: `Импорт завершен для ${month}. Обработано ${processedData.imported} записей.`
+        rate,
+        ...processedData,
+        message: `✅ Импорт завершен для ${month}!\n\nОбработано: ${processedData.totalProcessed} записей\nРабота: ${processedData.workDataCount} записей\nТесты: ${processedData.testDataCount} записей\nСотрудники: ${processedData.employees.length}`
       }
     })
 
   } catch (error) {
-    console.error('Error importing from sheets:', error)
+    console.error('Error importing from Google Drive:', error)
+    
+    if (error.message?.includes('invalid_grant') || error.message?.includes('unauthorized')) {
+      return NextResponse.json({
+        success: false,
+        error: 'Google authentication expired. Please re-authenticate.',
+        needsAuth: true,
+        authUrl: '/api/auth/google'
+      })
+    }
+
     return NextResponse.json(
-      { success: false, error: 'Error importing from sheets: ' + error.message },
+      { success: false, error: 'Import failed: ' + error.message },
       { status: 500 }
     )
   }
 }
 
-async function simulateGoogleSheetsImport(month: string, spreadsheetId?: string) {
-  // Simulate your Google Sheets structure
-  const juniorFolders = [
-    {
-      nickname: '@opporenno',
-      workData: [
-        { casino: 'Royal Casino', deposit: 1000, withdrawal: 1200, card: 'Card1' },
-        { casino: 'Lucky Spin', deposit: 500, withdrawal: 750, card: 'Card2' }
-      ]
-    },
-    {
-      nickname: '@newjunior',
-      workData: [
-        { casino: 'Bet Champion', deposit: 800, withdrawal: 950, card: 'Card3' }
-      ]
-    }
-  ]
+// ... остальные функции остаются без изменений
 
-  // Simulate @sobroffice test data
-  const testData = [
-    { casino: 'Test Casino 1', deposit: 300, withdrawal: 450, card: 'TestCard1' },
-    { casino: 'Test Casino 2', deposit: 200, withdrawal: 280, card: 'TestCard2' }
-  ]
-
-  return {
-    juniorFolders,
-    testData,
-    rate: 1.27 // Simulated current rate
-  }
-}
-
-async function processImportedData(data: any, month: string) {
-  let imported = 0
-  const employees = []
-  const workRecords = []
-  const testRecords = []
-
+// GET endpoint to check auth status
+export async function GET(request: NextRequest) {
   try {
-    // Process junior folders (like your Google Script)
-    for (const folder of data.juniorFolders) {
-      const nickname = folder.nickname
-
-      // Create or update employee
-      let employee = await prisma.employee.findUnique({
-        where: { nickname }
-      }).catch(() => null)
-
-      if (!employee) {
-        employee = await prisma.employee.create({
-          data: {
-            nickname,
-            role: 'JUNIOR',
-            isActive: true
-          }
-        }).catch(() => null)
-        
-        if (employee) {
-          employees.push(employee.nickname)
-        }
-      }
-
-      // Process work data for this employee
-      if (employee) {
-        for (const work of folder.workData) {
-          try {
-            const workRecord = await prisma.workData.create({
-              data: {
-                employeeId: employee.id,
-                month,
-                casino: work.casino,
-                deposit: work.deposit,
-                withdrawal: work.withdrawal,
-                card: work.card
-              }
-            }).catch(() => null)
-
-            if (workRecord) {
-              workRecords.push({
-                employee: nickname,
-                casino: work.casino,
-                profit: (work.withdrawal - work.deposit)
-              })
-              imported++
-            }
-          } catch (error) {
-            console.log(`Demo mode: Work record for ${nickname} not saved to DB`)
-            imported++
-          }
-        }
-      }
-    }
-
-    // Process test data for @sobroffice
-    let sobroffice = await prisma.employee.findUnique({
-      where: { nickname: '@sobroffice' }
-    }).catch(() => null)
-
-    if (!sobroffice) {
-      sobroffice = await prisma.employee.create({
+    const accessToken = request.cookies.get('google_access_token')?.value
+    const hasCredentials = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+    
+    if (!hasCredentials) {
+      return NextResponse.json({
+        success: false,
         data: {
-          nickname: '@sobroffice',
-          role: 'TESTER',
-          isActive: true
-        }
-      }).catch(() => null)
-
-      if (sobroffice) {
-        employees.push('@sobroffice')
-      }
-    }
-
-    // Process test results
-    if (sobroffice) {
-      for (const test of data.testData) {
-        try {
-          const testRecord = await prisma.testResult.create({
-            data: {
-              employeeId: sobroffice.id,
-              month,
-              casino: test.casino,
-              deposit: test.deposit,
-              withdrawal: test.withdrawal,
-              card: test.card
-            }
-          }).catch(() => null)
-
-          if (testRecord) {
-            testRecords.push({
-              casino: test.casino,
-              profit: (test.withdrawal - test.deposit)
-            })
-            imported++
-          }
-        } catch (error) {
-          console.log(`Demo mode: Test record not saved to DB`)
-          imported++
-        }
-      }
-    }
-
-    // Update monthly accounting with current rate
-    try {
-      await prisma.monthlyAccounting.upsert({
-        where: { month },
-        update: { gbpUsdRate: data.rate },
-        create: {
-          month,
-          gbpUsdRate: data.rate
+          status: 'not_configured',
+          message: 'Google OAuth не настроен'
         }
       })
-    } catch (error) {
-      console.log('Demo mode: Monthly accounting not saved to DB')
+    }
+
+    if (!accessToken) {
+      return NextResponse.json({
+        success: false,
+        data: {
+          status: 'not_authenticated',
+          message: 'Требуется авторизация Google',
+          authUrl: '/api/auth/google'
+        }
+      })
+    }
+
+    // Test API access
+    try {
+      const auth = getGoogleAuth(accessToken)
+      const drive = google.drive({ version: 'v3', auth })
+      
+      await drive.files.get({ fileId: process.env.GOOGLE_JUNIOR_FOLDER_ID! })
+      
+      return NextResponse.json({
+        success: true,
+        data: {
+          status: 'authenticated',
+          message: 'Google Drive доступ настроен и готов к работе'
+        }
+      })
+    } catch (apiError) {
+      return NextResponse.json({
+        success: false,
+        data: {
+          status: 'access_denied',
+          message: 'Нет доступа к Google Drive папке',
+          needsAuth: true,
+          authUrl: '/api/auth/google'
+        }
+      })
     }
 
   } catch (error) {
-    console.log('Demo mode: Processing completed with simulated data')
-    imported = data.juniorFolders.length + data.testData.length
-  }
-
-  return {
-    imported,
-    employees,
-    workRecords,
-    testRecords
-  }
-}
-
-// GET endpoint to check import status
-export async function GET() {
-  try {
-    const currentDate = new Date()
-    const currentMonth = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-    
-    // Check if data exists for current month
-    const monthlyRecord = await prisma.monthlyAccounting.findUnique({
-      where: { month: currentMonth }
-    }).catch(() => null)
-
-    const employeeCount = await prisma.employee.count().catch(() => 0)
-    
     return NextResponse.json({
-      success: true,
-      data: {
-        currentMonth,
-        hasData: !!monthlyRecord,
-        employeeCount,
-        lastImport: monthlyRecord?.updatedAt || null,
-        rate: monthlyRecord?.gbpUsdRate || 1.3
-      }
-    })
-
-  } catch (error) {
-    return NextResponse.json({
-      success: true,
-      data: {
-        currentMonth: 'December 2024',
-        hasData: false,
-        employeeCount: 0,
-        lastImport: null,
-        rate: 1.3,
-        demo: true
-      }
+      success: false,
+      error: error.message
     })
   }
 }
