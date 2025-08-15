@@ -204,4 +204,93 @@ export default function CareersPage() {
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
-                    r
+                    required
+                    className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+                    placeholder="ion@example.com"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-blue-200 font-medium mb-2">
+                    Telefon
+                  </label>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+                    placeholder="0722 123 456"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-blue-200 font-medium mb-2">
+                    Poziția Dorită *
+                  </label>
+                  <select
+                    name="position"
+                    value={formData.position}
+                    onChange={handleChange}
+                    required
+                    className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white focus:outline-none focus:ring-2 focus:ring-green-400"
+                  >
+                    <option value="">Selectează poziția</option>
+                    {positions.map((pos, index) => (
+                      <option key={index} value={pos.title} className="bg-gray-800">
+                        {pos.title}
+                      </option>
+                    ))}
+                    <option value="Altă poziție" className="bg-gray-800">Altă poziție</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-blue-200 font-medium mb-2">
+                  Mesaj / CV / Experiență *
+                </label>
+                <textarea
+                  name="message"
+                  value={formData.message}
+                  onChange={handleChange}
+                  required
+                  rows={6}
+                  className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-blue-300 focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
+                  placeholder="Spune-ne despre experiența ta, de ce vrei să lucrezi cu noi, și atasează link către CV-ul tău..."
+                />
+              </div>
+
+              {status && (
+                <div className="text-center">
+                  <p className={`text-lg ${status.includes('✓') ? 'text-green-300' : 'text-red-300'}`}>
+                    {status}
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-500 hover:to-blue-500 text-white font-bold py-4 px-6 rounded-lg transition-all duration-300 disabled:opacity-50"
+              >
+                {loading ? 'Se trimite...' : '🚀 Trimite Candidatura'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-black/20 border-t border-white/10 py-8">
+        <div className="max-w-7xl mx-auto px-4 text-center">
+          <p className="text-blue-200">
+            © 2024 Cazino Review România. Toate drepturile rezervate.
+          </p>
+        </div>
+      </footer>
+    </div>
+  )
+}
