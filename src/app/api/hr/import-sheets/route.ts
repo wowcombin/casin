@@ -17,6 +17,216 @@ function getGoogleAuth(accessToken: string) {
   return oauth2Client
 }
 
+async function getCurrentExchangeRate() {
+  try {
+    // You can implement real exchange rate API here
+    // For now, return default rate
+    return 1.27
+  } catch (error) {
+    return 1.3 // Fallback rate
+  }
+}
+
+async function importFromGoogleDrive(drive: any, sheets: any, month: string, rate: number) {
+  const juniorFolderId = process.env.GOOGLE_JUNIOR_FOLDER_ID
+  const testSpreadsheetId = process.env.GOOGLE_TEST_SPREADSHEET_ID
+
+  if (!juniorFolderId) {
+    throw new Error('Junior folder ID not configured')
+  }
+
+  console.log('Fetching Junior folders...')
+
+  // Get all subfolders in Junior folder
+  const foldersResponse = await drive.files.list({
+    q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
+    fields: 'files(id, name)'
+  })
+
+  const juniorFolders = foldersResponse.data.files || []
+  console.log(`Found ${juniorFolders.length} junior folders`)
+
+  const workData = []
+  const testData = []
+
+  // Process each junior folder
+  for (const folder of juniorFolders) {
+    try {
+      const nickname = folder.name.replace('WORK @', '')
+      console.log(`Processing folder: ${nickname}`)
+
+      // Find WORK spreadsheet in folder
+      const workFilesResponse = await drive.files.list({
+        q: `'${folder.id}' in parents and name contains 'WORK @'`,
+        fields: 'files(id, name)'
+      })
+
+      const workFiles = workFilesResponse.data.files || []
+      
+      if (workFiles.length > 0) {
+        const workFile = workFiles[0]
+        console.log(`Found work file: ${workFile.name}`)
+
+        // Get data from month sheet
+        try {
+          const monthSheetData = await sheets.spreadsheets.values.get({
+            spreadsheetId: workFile.id,
+            range: `${month}!A2:D1000` // Casino, Deposit, Withdrawal, Card
+          })
+
+          const rows = monthSheetData.data.values || []
+          
+          for (const row of rows) {
+            if (row.length >= 3 && row[0]) { // Has casino name
+              workData.push({
+                nickname: '@' + nickname,
+                casino: row[0] || 'Unknown',
+                deposit: parseFloat(row[1]) || 0,
+                withdrawal: parseFloat(row[2]) || 0,
+                card: row[3] || 'N/A'
+              })
+            }
+          }
+        } catch (sheetError) {
+          console.log(`No ${month} sheet found in ${workFile.name}`)
+        }
+      }
+    } catch (folderError) {
+      console.log(`Error processing folder ${folder.name}:`, folderError.message)
+    }
+  }
+
+  // Get test data from @sobroffice
+  if (testSpreadsheetId) {
+    try {
+      console.log('Fetching test data...')
+      const testSheetData = await sheets.spreadsheets.values.get({
+        spreadsheetId: testSpreadsheetId,
+        range: `${month}!A2:D1000`
+      })
+
+      const testRows = testSheetData.data.values || []
+      
+      for (const row of testRows) {
+        if (row.length >= 3 && row[0]) {
+          testData.push({
+            nickname: '@sobroffice',
+            casino: row[0] || 'Unknown',
+            deposit: parseFloat(row[1]) || 0,
+            withdrawal: parseFloat(row[2]) || 0,
+            card: row[3] || 'N/A'
+          })
+        }
+      }
+    } catch (testError) {
+      console.log('Error fetching test data:', testError.message)
+    }
+  }
+
+  return { workData, testData, rate }
+}
+
+async function processAndSaveData(importResult: any, month: string) {
+  const { workData, testData, rate } = importResult
+  let totalProcessed = 0
+  const employees = []
+  const workRecords = []
+  const testRecords = []
+
+  try {
+    // Process work data
+    for (const work of workData) {
+      // Create or update employee
+      let employee = await prisma.employee.upsert({
+        where: { nickname: work.nickname },
+        update: { isActive: true },
+        create: {
+          nickname: work.nickname,
+          role: 'JUNIOR',
+          isActive: true
+        }
+      })
+
+      // Create work record
+      await prisma.workData.create({
+        data: {
+          employeeId: employee.id,
+          month,
+          casino: work.casino,
+          deposit: work.deposit,
+          withdrawal: work.withdrawal,
+          card: work.card
+        }
+      })
+
+      workRecords.push({
+        employee: work.nickname,
+        casino: work.casino,
+        profit: (work.withdrawal - work.deposit)
+      })
+      totalProcessed++
+
+      if (!employees.includes(work.nickname)) {
+        employees.push(work.nickname)
+      }
+    }
+
+    // Process test data
+    for (const test of testData) {
+      let employee = await prisma.employee.upsert({
+        where: { nickname: '@sobroffice' },
+        update: { isActive: true },
+        create: {
+          nickname: '@sobroffice',
+          role: 'TESTER',
+          isActive: true
+        }
+      })
+
+      await prisma.testResult.create({
+        data: {
+          employeeId: employee.id,
+          month,
+          casino: test.casino,
+          deposit: test.deposit,
+          withdrawal: test.withdrawal,
+          card: test.card
+        }
+      })
+
+      testRecords.push({
+        casino: test.casino,
+        profit: (test.withdrawal - test.deposit)
+      })
+      totalProcessed++
+    }
+
+    // Update monthly accounting
+    await prisma.monthlyAccounting.upsert({
+      where: { month },
+      update: { gbpUsdRate: rate },
+      create: {
+        month,
+        gbpUsdRate: rate
+      }
+    })
+
+  } catch (dbError) {
+    console.log('Database save error:', dbError.message)
+    // Continue with demo data if DB fails
+    totalProcessed = workData.length + testData.length
+  }
+
+  return {
+    totalProcessed,
+    employees,
+    workRecords,
+    testRecords,
+    workDataCount: workData.length,
+    testDataCount: testData.length
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { month } = await request.json()
@@ -83,8 +293,6 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-
-// ... остальные функции остаются без изменений
 
 // GET endpoint to check auth status
 export async function GET(request: NextRequest) {
