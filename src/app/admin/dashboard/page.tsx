@@ -19,20 +19,16 @@ export default function AdminDashboard() {
   const router = useRouter()
 
   useEffect(() => {
-    // Проверяем авторизацию
     const isLoggedIn = localStorage.getItem('admin_logged_in')
     if (!isLoggedIn) {
       router.push('/admin/login')
       return
     }
-
-    // Инициализируем данные
     initDashboard()
   }, [router])
 
   const initDashboard = async () => {
     try {
-      // Инициализируем БД
       await fetch('/api/init', { method: 'POST' })
       
       setStats({
@@ -42,7 +38,6 @@ export default function AdminDashboard() {
         totalUsers: 1
       })
 
-      // Демо данные для отчетов
       setData({
         partnerships: [
           { id: 1, companyName: 'Royal Casino SRL', email: 'contact@royal.com', status: 'PENDING', createdAt: new Date() },
@@ -69,9 +64,59 @@ export default function AdminDashboard() {
     router.push('/admin/login')
   }
 
+  const calculateProfits = async () => {
+    try {
+      const response = await fetch('/api/hr/calculate-profits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: 'December 2024' })
+      })
+      
+      if (response.ok) {
+        alert('Прибыль рассчитана успешно!')
+      } else {
+        alert('Ошибка при расчете прибыли')
+      }
+    } catch (error) {
+      alert('Ошибка при расчете прибыли')
+    }
+  }
+
+  const calculateMonthlyProfits = async (month: string) => {
+    try {
+      const response = await fetch('/api/hr/calculate-profits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month })
+      })
+      
+      if (response.ok) {
+        alert(`Прибыль за ${month} рассчитана успешно!`)
+      } else {
+        alert('Ошибка при расчете прибыли')
+      }
+    } catch (error) {
+      alert('Ошибка при расчете прибыли')
+    }
+  }
+
+  const addEmployee = () => {
+    const nickname = prompt('Введите nickname сотрудника (например: @username):')
+    if (nickname) {
+      alert(`Сотрудник ${nickname} будет добавлен`)
+    }
+  }
+
+  const importFromSheets = () => {
+    alert('Функция импорта из Google Sheets будет реализована')
+  }
+
+  const exportReport = () => {
+    alert('Экспорт отчета будет реализован')
+  }
+
   const renderDashboard = () => (
     <div>
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="p-5">
@@ -146,7 +191,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Quick Actions */}
       <div className="bg-white shadow rounded-lg">
         <div className="px-4 py-5 sm:p-6">
           <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">Acțiuni Rapide</h3>
@@ -204,15 +248,6 @@ export default function AdminDashboard() {
                   <button className="text-red-600 hover:text-red-900">Delete</button>
                 </td>
               </tr>
-              <tr>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">Lucky Spin</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">4.2/5</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">50 Rotiri Gratuite</td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button className="text-indigo-600 hover:text-indigo-900 mr-2">Edit</button>
-                  <button className="text-red-600 hover:text-red-900">Delete</button>
-                </td>
-              </tr>
             </tbody>
           </table>
         </div>
@@ -221,273 +256,135 @@ export default function AdminDashboard() {
   )
 
   const renderUsers = () => (
-  <div className="space-y-8">
-    {/* HR Management Section */}
-    <div className="bg-white shadow rounded-lg">
-      <div className="px-4 py-5 sm:p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg leading-6 font-medium text-gray-900">HR Управление</h3>
-          <div className="space-x-2">
-            <button 
-              onClick={() => calculateProfits()}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-            >
-              Рассчитать Прибыль
-            </button>
-            <button 
-              onClick={() => addEmployee()}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-            >
-              + Добавить Сотрудника
-            </button>
+    <div className="space-y-8">
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg leading-6 font-medium text-gray-900">HR Управление</h3>
+            <div className="space-x-2">
+              <button 
+                onClick={() => calculateProfits()}
+                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+              >
+                Рассчитать Прибыль
+              </button>
+              <button 
+                onClick={() => addEmployee()}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+              >
+                + Добавить Сотрудника
+              </button>
+            </div>
           </div>
-        </div>
-        
-        {/* Employees Table */}
-        <div className="overflow-x-auto mb-8">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nickname</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Month Profit</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              <tr>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">@opporenno</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Junior</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                    Active
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">$850.50</td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button className="text-indigo-600 hover:text-indigo-900 mr-2">View</button>
-                  <button className="text-red-600 hover:text-red-900">Deactivate</button>
-                </td>
-              </tr>
-              <tr>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">@sobroffice</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Tester</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                    Active
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">$1,250.75</td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button className="text-indigo-600 hover:text-indigo-900 mr-2">View</button>
-                  <button className="text-red-600 hover:text-red-900">Deactivate</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <h4 className="text-md font-medium text-blue-900 mb-2">Месячный Расчет</h4>
-            <p className="text-sm text-blue-700 mb-3">Запустить автоматический расчет прибыли за месяц</p>
-            <button 
-              onClick={() => calculateMonthlyProfits('December 2024')}
-              className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
-            >
-              Рассчитать за Декабрь
-            </button>
-          </div>
-
-          <div className="bg-green-50 p-4 rounded-lg">
-            <h4 className="text-md font-medium text-green-900 mb-2">Импорт Данных</h4>
-            <p className="text-sm text-green-700 mb-3">Загрузить данные из Google Sheets</p>
-            <button 
-              onClick={() => importFromSheets()}
-              className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
-            >
-              Импортировать
-            </button>
-          </div>
-
-          <div className="bg-purple-50 p-4 rounded-lg">
-            <h4 className="text-md font-medium text-purple-900 mb-2">Экспорт Отчета</h4>
-            <p className="text-sm text-purple-700 mb-3">Создать отчет по всем сотрудникам</p>
-            <button 
-              onClick={() => exportReport()}
-              className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700"
-            >
-              Скачать Отчет
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    {/* Partnership Requests */}
-    <div className="bg-white shadow rounded-lg">
-      <div className="px-4 py-5 sm:p-6">
-        <h4 className="text-md font-medium text-gray-700 mb-4">Partnership Requests</h4>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {data.partnerships.map((partnership: any) => (
-                <tr key={partnership.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{partnership.companyName}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{partnership.email}</td>
+          
+          <div className="overflow-x-auto mb-8">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nickname</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Month Profit</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                <tr>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">@opporenno</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Junior</td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      partnership.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
-                    }`}>
-                      {partnership.status}
+                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                      Active
                     </span>
                   </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">$850.50</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button className="text-green-600 hover:text-green-900 mr-2">Approve</button>
-                    <button className="text-red-600 hover:text-red-900">Reject</button>
+                    <button className="text-indigo-600 hover:text-indigo-900 mr-2">View</button>
+                    <button className="text-red-600 hover:text-red-900">Deactivate</button>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    {/* Job Applications */}
-    <div className="bg-white shadow rounded-lg">
-      <div className="px-4 py-5 sm:p-6">
-        <h4 className="text-md font-medium text-gray-700 mb-4">Job Applications</h4>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Position</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {data.jobApplications.map((application: any) => (
-                <tr key={application.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{application.name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{application.email}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{application.position}</td>
+                <tr>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">@sobroffice</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Tester</td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      application.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'
-                    }`}>
-                      {application.status}
+                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                      Active
                     </span>
                   </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">$1,250.75</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button className="text-green-600 hover:text-green-900 mr-2">Accept</button>
-                    <button className="text-red-600 hover:text-red-900">Reject</button>
+                    <button className="text-indigo-600 hover:text-indigo-900 mr-2">View</button>
+                    <button className="text-red-600 hover:text-red-900">Deactivate</button>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <h4 className="text-md font-medium text-blue-900 mb-2">Месячный Расчет</h4>
+              <p className="text-sm text-blue-700 mb-3">Запустить автоматический расчет прибыли за месяц</p>
+              <button 
+                onClick={() => calculateMonthlyProfits('December 2024')}
+                className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+              >
+                Рассчитать за Декабрь
+              </button>
+            </div>
+
+            <div className="bg-green-50 p-4 rounded-lg">
+              <h4 className="text-md font-medium text-green-900 mb-2">Импорт Данных</h4>
+              <p className="text-sm text-green-700 mb-3">Загрузить данные из Google Sheets</p>
+              <button 
+                onClick={() => importFromSheets()}
+                className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+              >
+                Импортировать
+              </button>
+            </div>
+
+            <div className="bg-purple-50 p-4 rounded-lg">
+              <h4 className="text-md font-medium text-purple-900 mb-2">Экспорт Отчета</h4>
+              <p className="text-sm text-purple-700 mb-3">Создать отчет по всем сотрудникам</p>
+              <button 
+                onClick={() => exportReport()}
+                className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700"
+              >
+                Скачать Отчет
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
-)
 
-// Добавьте эти функции в компонент
-const calculateProfits = async () => {
-  try {
-    const response = await fetch('/api/hr/calculate-profits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ month: 'December 2024' })
-    })
-    
-    if (response.ok) {
-      alert('Прибыль рассчитана успешно!')
-      // Обновить данные
-    } else {
-      alert('Ошибка при расчете прибыли')
-    }
-  } catch (error) {
-    alert('Ошибка при расчете прибыли')
-  }
-}
-
-const calculateMonthlyProfits = async (month: string) => {
-  try {
-    const response = await fetch('/api/hr/calculate-profits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ month })
-    })
-    
-    if (response.ok) {
-      alert(`Прибыль за ${month} рассчитана успешно!`)
-    } else {
-      alert('Ошибка при расчете прибыли')
-    }
-  } catch (error) {
-    alert('Ошибка при расчете прибыли')
-  }
-}
-
-const addEmployee = () => {
-  const nickname = prompt('Введите nickname сотрудника (например: @username):')
-  if (nickname) {
-    // Вызов API для добавления сотрудника
-    alert(`Сотрудник ${nickname} будет добавлен`)
-  }
-}
-
-const importFromSheets = () => {
-  alert('Функция импорта из Google Sheets будет реализована')
-}
-
-const exportReport = () => {
-  alert('Экспорт отчета будет реализован')
-}
-
-        <div>
-          <h4 className="text-md font-medium text-gray-700 mb-4">Job Applications</h4>
+      <div className="bg-white shadow rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <h4 className="text-md font-medium text-gray-700 mb-4">Partnership Requests</h4>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nume</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Poziție</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acțiuni</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {data.jobApplications.map((application: any) => (
-                  <tr key={application.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{application.name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{application.email}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{application.position}</td>
+                {data.partnerships.map((partnership: any) => (
+                  <tr key={partnership.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{partnership.companyName}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{partnership.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        application.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'
+                        partnership.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
                       }`}>
-                        {application.status}
+                        {partnership.status}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button className="text-green-600 hover:text-green-900 mr-2">Accept</button>
+                      <button className="text-green-600 hover:text-green-900 mr-2">Approve</button>
                       <button className="text-red-600 hover:text-red-900">Reject</button>
                     </td>
                   </tr>
@@ -517,42 +414,6 @@ const exportReport = () => {
             <p className="text-2xl font-bold text-green-600">{data.partnerships.length}</p>
             <p className="text-sm text-gray-500">Total requests</p>
           </div>
-          
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h4 className="text-md font-medium text-gray-700 mb-2">Job Applications</h4>
-            <p className="text-2xl font-bold text-purple-600">{data.jobApplications.length}</p>
-            <p className="text-sm text-gray-500">Total applications</p>
-          </div>
-          
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h4 className="text-md font-medium text-gray-700 mb-2">Active Casinos</h4>
-            <p className="text-2xl font-bold text-red-600">{stats.totalCasinos}</p>
-            <p className="text-sm text-gray-500">Listed casinos</p>
-          </div>
-        </div>
-
-        <div className="mt-6">
-          <h4 className="text-md font-medium text-gray-700 mb-4">Recent Newsletter Subscribers</h4>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data Înscrierii</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {data.newsletters.map((subscriber: any) => (
-                  <tr key={subscriber.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{subscriber.email}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {subscriber.subscribedAt.toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
     </div>
@@ -571,7 +432,6 @@ const exportReport = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
@@ -605,7 +465,7 @@ const exportReport = () => {
                     : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                 }`}
               >
-                Utilizatori
+                HR & Utilizatori
               </button>
               <button
                 onClick={() => setActiveSection('reports')}
@@ -628,7 +488,6 @@ const exportReport = () => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         {activeSection === 'dashboard' && renderDashboard()}
         {activeSection === 'casinos' && renderCasinos()}
