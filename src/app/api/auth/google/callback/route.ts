@@ -1,18 +1,24 @@
 import { NextResponse, NextRequest } from 'next/server'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const code = searchParams.get('code')
-    const error = searchParams.get('error')
+    const url = new URL(request.url)
+    const code = url.searchParams.get('code')
+    const error = url.searchParams.get('error')
+
+    const baseUrl = "https://casin.vercel.app"
 
     if (error) {
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/admin/dashboard?auth_error=${error}`)
+      return NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_error=${error}`)
     }
 
     if (!code) {
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/admin/dashboard?auth_error=no_code`)
+      return NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_error=no_code`)
     }
+
+    console.log('Exchanging OAuth code for tokens...')
 
     // Exchange code for tokens
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
@@ -23,34 +29,35 @@ export async function GET(request: NextRequest) {
         client_secret: process.env.GOOGLE_CLIENT_SECRET!,
         code,
         grant_type: 'authorization_code',
-        redirect_uri: process.env.GOOGLE_REDIRECT_URI || `${process.env.NEXTAUTH_URL}/api/auth/google/callback`
+        redirect_uri: `${baseUrl}/api/auth/google/callback`
       })
     })
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text()
       console.error('Token exchange failed:', errorText)
-      return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/admin/dashboard?auth_error=token_exchange_failed`)
+      return NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_error=token_exchange_failed`)
     }
 
     const tokens = await tokenResponse.json()
+    console.log('OAuth tokens received successfully')
 
-    // Store tokens (in production, save to database securely)
-    // For now, we'll set them as secure cookies or session storage
-    const response = NextResponse.redirect(`${process.env.NEXTAUTH_URL}/admin/dashboard?auth_success=true`)
+    // Store tokens
+    const response = NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_success=true`)
     
-    // Set secure cookies with tokens (httpOnly for security)
     response.cookies.set('google_access_token', tokens.access_token, {
       httpOnly: true,
       secure: true,
-      maxAge: tokens.expires_in || 3600
+      maxAge: tokens.expires_in || 3600,
+      sameSite: 'lax'
     })
 
     if (tokens.refresh_token) {
       response.cookies.set('google_refresh_token', tokens.refresh_token, {
         httpOnly: true,
         secure: true,
-        maxAge: 60 * 60 * 24 * 30 // 30 days
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: 'lax'
       })
     }
 
@@ -58,6 +65,6 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('OAuth callback error:', error)
-    return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/admin/dashboard?auth_error=callback_failed`)
+    return NextResponse.redirect(`https://casin.vercel.app/admin/dashboard?auth_error=callback_failed`)
   }
 }
