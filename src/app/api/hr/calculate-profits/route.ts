@@ -20,45 +20,36 @@ export async function POST(request: NextRequest) {
       '@zvr1903': 0.05
     }
 
-    // Get or create monthly accounting record
-    const monthlyAccounting = await getOrCreateMonthlyAccounting(month)
-    const rate = monthlyAccounting.gbpUsdRate
+    // Get current GBP/USD rate (demo version)
+    const rate = 1.3 // You can implement real API call here
 
-    // Get all work data for the month
-    const workData = await prisma.workData.findMany({
-      where: { month },
-      include: { employee: true }
-    })
+    console.log(`Calculating profits for ${month} with rate ${rate}`)
 
-    // Get test results for @sobroffice
-    const testResults = await prisma.testResult.findMany({
-      where: { 
-        month,
-        employee: { nickname: '@sobroffice' }
-      }
-    })
+    // Demo calculation (since DB tables don't exist yet)
+    const demoWorkData = [
+      { employee: '@opporenno', casino: 'Royal Casino', deposit: 1000, withdrawal: 1200, card: 'Card1' },
+      { employee: '@sobroffice', casino: 'Lucky Spin', deposit: 500, withdrawal: 750, card: 'Card2' }
+    ]
 
-    // Get spending for the month
-    const spending = await prisma.spending.findMany({
-      where: { month }
-    })
-
-    const totalSpending = spending.reduce((sum, item) => sum + item.amount, 0)
+    const demoTestResults = [
+      { employee: '@sobroffice', casino: 'Test Casino', deposit: 300, withdrawal: 450, card: 'TestCard' }
+    ]
 
     // Calculate profits
-    const juniorProfits = {}
+    const juniorProfits: { [key: string]: number } = {}
     let totalBase = 0
     let totalProfit = 0
+    const totalSpending = 0 // Demo value
 
     // Process work data
-    for (const work of workData) {
+    for (const work of demoWorkData) {
       const base = (work.withdrawal - work.deposit) * rate * 0.97
       const calculation = base * 0.1 // 10% profit
       
       totalBase += base
       totalProfit += calculation
 
-      const nickname = work.employee.nickname
+      const nickname = work.employee
       if (!juniorProfits[nickname]) {
         juniorProfits[nickname] = 0
       }
@@ -66,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Add test results for @sobroffice
-    for (const test of testResults) {
+    for (const test of demoTestResults) {
       const testCalculation = (test.withdrawal - test.deposit) * rate * 0.97 * 0.1
       if (!juniorProfits['@sobroffice']) {
         juniorProfits['@sobroffice'] = 0
@@ -85,7 +76,7 @@ export async function POST(request: NextRequest) {
     const isExceedSpending = totalSpending > 0.25 * totalBase
     const baseForTeam = isExceedSpending ? totalBase - totalSpending : totalBase
 
-    const teamProfits = {}
+    const teamProfits: { [key: string]: number } = {}
     for (const [member, percent] of Object.entries(team)) {
       teamProfits[member] = percent * baseForTeam
     }
@@ -98,18 +89,11 @@ export async function POST(request: NextRequest) {
       juniorProfits['@sobroffice'] += teamProfits['@sobroffice']
     }
 
-    // Save profits to database
-    await saveEmployeeProfits(month, juniorProfits, teamProfits)
-
-    // Update monthly accounting
-    await prisma.monthlyAccounting.update({
-      where: { month },
-      data: {
-        totalBase,
-        totalSpending,
-        totalProfit,
-        isProcessed: true
-      }
+    console.log('Calculation completed:', {
+      juniorProfits,
+      teamProfits,
+      totalBase,
+      totalProfit
     })
 
     return NextResponse.json({
@@ -117,115 +101,20 @@ export async function POST(request: NextRequest) {
       data: {
         month,
         rate,
-        totalBase,
+        totalBase: Math.round(totalBase * 100) / 100,
         totalSpending,
-        totalProfit,
+        totalProfit: Math.round(totalProfit * 100) / 100,
         juniorProfits,
-        teamProfits
+        teamProfits,
+        message: 'Расчет выполнен успешно (демо данные)'
       }
     })
 
   } catch (error) {
     console.error('Error calculating profits:', error)
     return NextResponse.json(
-      { success: false, error: 'Error calculating profits' },
+      { success: false, error: 'Error calculating profits: ' + error.message },
       { status: 500 }
     )
-  }
-}
-
-async function getOrCreateMonthlyAccounting(month: string) {
-  try {
-    let accounting = await prisma.monthlyAccounting.findUnique({
-      where: { month }
-    })
-
-    if (!accounting) {
-      // Get current GBP/USD rate (you can implement API call here)
-      const rate = 1.3 // Default rate or fetch from API
-
-      accounting = await prisma.monthlyAccounting.create({
-        data: {
-          month,
-          gbpUsdRate: rate
-        }
-      })
-    }
-
-    return accounting
-  } catch (error) {
-    // Return default if DB not available
-    return {
-      month,
-      gbpUsdRate: 1.3,
-      totalBase: 0,
-      totalSpending: 0,
-      totalProfit: 0,
-      isProcessed: false
-    }
-  }
-}
-
-async function saveEmployeeProfits(month: string, juniorProfits: any, teamProfits: any) {
-  try {
-    // Save junior profits
-    for (const [nickname, profit] of Object.entries(juniorProfits)) {
-      const employee = await prisma.employee.findUnique({
-        where: { nickname }
-      })
-
-      if (employee) {
-        await prisma.employeeProfit.upsert({
-          where: {
-            employeeId_month: {
-              employeeId: employee.id,
-              month
-            }
-          },
-          update: {
-            baseProfit: profit as number,
-            totalProfit: profit as number
-          },
-          create: {
-            employeeId: employee.id,
-            month,
-            baseProfit: profit as number,
-            totalProfit: profit as number
-          }
-        })
-      }
-    }
-
-    // Save team profits
-    for (const [nickname, profit] of Object.entries(teamProfits)) {
-      if (nickname === '@sobroffice') continue // Already handled above
-
-      const employee = await prisma.employee.findUnique({
-        where: { nickname }
-      })
-
-      if (employee) {
-        await prisma.employeeProfit.upsert({
-          where: {
-            employeeId_month: {
-              employeeId: employee.id,
-              month
-            }
-          },
-          update: {
-            teamProfit: profit as number,
-            totalProfit: (profit as number)
-          },
-          create: {
-            employeeId: employee.id,
-            month,
-            teamProfit: profit as number,
-            totalProfit: profit as number
-          }
-        })
-      }
-    }
-  } catch (error) {
-    console.log('Demo mode: Profits calculated but not saved to DB')
   }
 }
