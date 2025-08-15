@@ -17,9 +17,7 @@ model User {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  // Relations
   casinos Casino[]
-
   @@map("users")
 }
 
@@ -35,10 +33,8 @@ model Casino {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // Relations
   author User             @relation(fields: [authorId], references: [id])
   clicks ReferralClick[]
-
   @@map("casinos")
 }
 
@@ -51,9 +47,7 @@ model ReferralClick {
   revenue   Float?   @default(0)
   clickedAt DateTime @default(now())
 
-  // Relations
   casino Casino @relation(fields: [casinoId], references: [id])
-
   @@map("referral_clicks")
 }
 
@@ -62,7 +56,6 @@ model Newsletter {
   email        String   @unique
   subscribedAt DateTime @default(now())
   isActive     Boolean  @default(true)
-
   @@map("newsletter")
 }
 
@@ -75,7 +68,6 @@ model Partnership {
   status      PartnershipStatus @default(PENDING)
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
-
   @@map("partnerships")
 }
 
@@ -90,8 +82,99 @@ model JobApplication {
   status    ApplicationStatus   @default(PENDING)
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
-
   @@map("job_applications")
+}
+
+model Employee {
+  id        String       @id @default(cuid())
+  nickname  String       @unique
+  email     String?
+  role      EmployeeRole @default(JUNIOR)
+  isActive  Boolean      @default(true)
+  folderId  String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  workData     WorkData[]
+  profits      EmployeeProfit[]
+  testResults  TestResult[]
+  @@map("employees")
+}
+
+model WorkData {
+  id         String   @id @default(cuid())
+  employeeId String
+  month      String
+  casino     String
+  deposit    Float    @default(0)
+  withdrawal Float    @default(0)
+  card       String?
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  @@map("work_data")
+}
+
+model TestResult {
+  id         String   @id @default(cuid())
+  employeeId String
+  month      String
+  casino     String
+  deposit    Float    @default(0)
+  withdrawal Float    @default(0)
+  card       String?
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  @@map("test_results")
+}
+
+model EmployeeProfit {
+  id         String  @id @default(cuid())
+  employeeId String
+  month      String
+  baseProfit Float   @default(0)
+  teamProfit Float   @default(0)
+  bonus      Float   @default(0)
+  totalProfit Float  @default(0)
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  
+  @@unique([employeeId, month])
+  @@map("employee_profits")
+}
+
+model MonthlyAccounting {
+  id           String   @id @default(cuid())
+  month        String   @unique
+  gbpUsdRate   Float    @default(1.3)
+  totalBase    Float    @default(0)
+  totalSpending Float   @default(0)
+  totalProfit  Float    @default(0)
+  isProcessed  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@map("monthly_accounting")
+}
+
+model SiteProfit {
+  id          String   @id @default(cuid())
+  month       String
+  siteName    String
+  totalProfit Float    @default(0)
+  createdAt   DateTime @default(now())
+  @@map("site_profits")
+}
+
+model Spending {
+  id          String   @id @default(cuid())
+  month       String
+  category    String
+  amount      Float
+  description String?
+  createdAt   DateTime @default(now())
+  @@map("spending")
 }
 
 enum UserRole {
@@ -118,107 +201,6 @@ enum ApplicationStatus {
   REVIEWING
   ACCEPTED
   REJECTED
-}
-
-model Employee {
-  id        String       @id @default(cuid())
-  nickname  String       @unique
-  email     String?
-  role      EmployeeRole @default(JUNIOR)
-  isActive  Boolean      @default(true)
-  folderId  String?      // Google Drive folder ID
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-
-  // Relations
-  workData     WorkData[]
-  profits      EmployeeProfit[]
-  testResults  TestResult[]
-
-  @@map("employees")
-}
-
-model WorkData {
-  id         String   @id @default(cuid())
-  employeeId String
-  month      String   // "August 2024"
-  casino     String
-  deposit    Float    @default(0)
-  withdrawal Float    @default(0)
-  card       String?
-  createdAt  DateTime @default(now())
-
-  // Relations
-  employee Employee @relation(fields: [employeeId], references: [id])
-
-  @@map("work_data")
-}
-
-model TestResult {
-  id         String   @id @default(cuid())
-  employeeId String
-  month      String
-  casino     String
-  deposit    Float    @default(0)
-  withdrawal Float    @default(0)
-  card       String?
-  createdAt  DateTime @default(now())
-
-  // Relations
-  employee Employee @relation(fields: [employeeId], references: [id])
-
-  @@map("test_results")
-}
-
-model EmployeeProfit {
-  id         String  @id @default(cuid())
-  employeeId String
-  month      String
-  baseProfit Float   @default(0)
-  teamProfit Float   @default(0)
-  bonus      Float   @default(0)
-  totalProfit Float  @default(0)
-  createdAt  DateTime @default(now())
-
-  // Relations
-  employee Employee @relation(fields: [employeeId], references: [id])
-
-  @@map("employee_profits")
-}
-
-model MonthlyAccounting {
-  id           String   @id @default(cuid())
-  month        String   @unique
-  gbpUsdRate   Float    @default(1.3)
-  totalBase    Float    @default(0)
-  totalSpending Float   @default(0)
-  totalProfit  Float    @default(0)
-  isProcessed  Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@map("monthly_accounting")
-}
-
-model SiteProfit {
-  id          String   @id @default(cuid())
-  month       String
-  siteName    String
-  totalProfit Float    @default(0)
-  createdAt   DateTime @default(now())
-
-  @@map("site_profits")
-}
-
-model Spending {
-  id          String   @id @default(cuid())
-  month       String
-  category    String
-  amount      Float
-  description String?
-  createdAt   DateTime @default(now())
-
-  @@map("spending")
 }
 
 enum EmployeeRole {
