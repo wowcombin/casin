@@ -57,6 +57,43 @@ model ReferralClick {
   @@map("referral_clicks")
 }
 
+model Newsletter {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  subscribedAt DateTime @default(now())
+  isActive     Boolean  @default(true)
+
+  @@map("newsletter")
+}
+
+model Partnership {
+  id          String            @id @default(cuid())
+  companyName String
+  email       String
+  website     String?
+  message     String
+  status      PartnershipStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@map("partnerships")
+}
+
+model JobApplication {
+  id        String              @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  position  String
+  message   String
+  resumeUrl String?
+  status    ApplicationStatus   @default(PENDING)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@map("job_applications")
+}
+
 enum UserRole {
   ADMIN
   MANAGER
@@ -68,4 +105,17 @@ enum UserStatus {
   ACTIVE
   INACTIVE
   SUSPENDED
+}
+
+enum PartnershipStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ApplicationStatus {
+  PENDING
+  REVIEWING
+  ACCEPTED
+  REJECTED
 }
