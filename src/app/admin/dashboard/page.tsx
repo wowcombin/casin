@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [activeSection, setActiveSection] = useState('dashboard')
+  const [googleAuthStatus, setGoogleAuthStatus] = useState<'checking' | 'authenticated' | 'not_authenticated' | 'error'>('checking')
   const [stats, setStats] = useState({
     totalCasinos: 0,
     totalClicks: 0,
@@ -25,6 +26,7 @@ export default function AdminDashboard() {
       return
     }
     initDashboard()
+    checkGoogleAuth()
   }, [router])
 
   const initDashboard = async () => {
@@ -56,6 +58,23 @@ export default function AdminDashboard() {
       console.error('Error initializing dashboard:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const checkGoogleAuth = async () => {
+    try {
+      const response = await fetch('/api/hr/import-sheets')
+      const result = await response.json()
+      
+      if (result.success) {
+        setGoogleAuthStatus('authenticated')
+      } else if (result.data?.status === 'not_authenticated') {
+        setGoogleAuthStatus('not_authenticated')
+      } else {
+        setGoogleAuthStatus('error')
+      }
+    } catch (error) {
+      setGoogleAuthStatus('error')
     }
   }
 
@@ -133,7 +152,18 @@ export default function AdminDashboard() {
     try {
       setLoading(true)
       
-      // Get current month for import
+      // Проверяем статус авторизации
+      if (googleAuthStatus === 'not_authenticated') {
+        const confirmAuth = window.confirm('Требуется авторизация Google Drive. Перейти к авторизации?')
+        if (confirmAuth) {
+          window.location.href = '/api/auth/google'
+          return
+        } else {
+          setLoading(false)
+          return
+        }
+      }
+      
       const currentDate = new Date()
       const currentMonth = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
       
@@ -144,17 +174,22 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           month: currentMonth,
-          spreadsheetId: '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu' // Your Junior folder ID
+          spreadsheetId: '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu'
         })
       })
       
       const result = await response.json()
       
       if (result.success) {
-        alert(`✅ Импорт завершен!\n\n${result.data.message}\n\nИмпортировано: ${result.data.imported} записей\nСотрудники: ${result.data.employees.length}\nРабочие записи: ${result.data.workRecords.length}\nТестовые записи: ${result.data.testRecords.length}`)
-        
-        // Refresh dashboard data
+        alert(`✅ Импорт завершен!\n\n${result.data.message}`)
         initDashboard()
+        checkGoogleAuth() // Обновляем статус
+      } else if (result.needsAuth) {
+        setGoogleAuthStatus('not_authenticated')
+        const confirmAuth = window.confirm('Требуется авторизация Google Drive. Перейти к авторизации?')
+        if (confirmAuth) {
+          window.location.href = '/api/auth/google'
+        }
       } else {
         alert('❌ Ошибка при импорте: ' + result.error)
       }
@@ -393,14 +428,40 @@ export default function AdminDashboard() {
 
             <div className="bg-green-50 p-4 rounded-lg">
               <h4 className="text-md font-medium text-green-900 mb-2">Импорт Данных</h4>
-              <p className="text-sm text-green-700 mb-3">Загрузить данные из Google Sheets (как ваши скрипты)</p>
-              <button 
-                onClick={() => importFromSheets()}
-                disabled={loading}
-                className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50"
-              >
-                {loading ? 'Импорт...' : 'Импортировать'}
-              </button>
+              <p className="text-sm text-green-700 mb-3">Загрузить данные из Google Drive папок сотрудников</p>
+              
+              {/* Статус авторизации */}
+              <div className="mb-2">
+                {googleAuthStatus === 'checking' && (
+                  <span className="text-xs text-gray-500">Проверка авторизации...</span>
+                )}
+                {googleAuthStatus === 'authenticated' && (
+                  <span className="text-xs text-green-600">✅ Google Drive подключен</span>
+                )}
+                {googleAuthStatus === 'not_authenticated' && (
+                  <span className="text-xs text-red-600">❌ Требуется авторизация Google</span>
+                )}
+                {googleAuthStatus === 'error' && (
+                  <span className="text-xs text-orange-600">⚠️ Ошибка проверки авторизации</span>
+                )}
+              </div>
+
+              {googleAuthStatus === 'not_authenticated' ? (
+                <button 
+                  onClick={() => window.location.href = '/api/auth/google'}
+                  className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                >
+                  🔗 Подключить Google Drive
+                </button>
+              ) : (
+                <button 
+                  onClick={() => importFromSheets()}
+                  disabled={loading || googleAuthStatus !== 'authenticated'}
+                  className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50"
+                >
+                  {loading ? 'Импорт...' : 'Импортировать данные'}
+                </button>
+              )}
             </div>
 
             <div className="bg-purple-50 p-4 rounded-lg">
