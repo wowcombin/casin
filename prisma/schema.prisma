@@ -8,21 +8,17 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
+  id        String     @id @default(cuid())
+  email     String     @unique
   name      String?
-  role      UserRole @default(EMPLOYEE)
+  role      UserRole   @default(EMPLOYEE)
   salary    Float?
   status    UserStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   // Relations
-  casinos      Casino[]
-  performance  Performance[]
-  payrolls     Payroll[]
-  tasks        Task[]
-  sentMessages Message[] @relation("MessageSender")
+  casinos Casino[]
 
   @@map("users")
 }
@@ -40,20 +36,20 @@ model Casino {
   updatedAt   DateTime @updatedAt
 
   // Relations
-  author       User             @relation(fields: [authorId], references: [id])
-  clicks       ReferralClick[]
+  author User             @relation(fields: [authorId], references: [id])
+  clicks ReferralClick[]
 
   @@map("casinos")
 }
 
 model ReferralClick {
-  id         String   @id @default(cuid())
-  casinoId   String
-  userAgent  String?
-  ipAddress  String?
-  country    String?
-  revenue    Float?   @default(0)
-  clickedAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  casinoId  String
+  userAgent String?
+  ipAddress String?
+  country   String?
+  revenue   Float?   @default(0)
+  clickedAt DateTime @default(now())
 
   // Relations
   casino Casino @relation(fields: [casinoId], references: [id])
