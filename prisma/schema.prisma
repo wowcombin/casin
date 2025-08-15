@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      UserRole @default(EMPLOYEE)
+  salary    Float?
+  status    UserStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  casinos      Casino[]
+  performance  Performance[]
+  payrolls     Payroll[]
+  tasks        Task[]
+  sentMessages Message[] @relation("MessageSender")
+
+  @@map("users")
+}
+
+model Casino {
+  id          String   @id @default(cuid())
+  name        String
+  rating      Float
+  bonus       String?
+  description String?
+  logoUrl     String?
+  referralUrl String?
+  authorId    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  author       User             @relation(fields: [authorId], references: [id])
+  clicks       ReferralClick[]
+
+  @@map("casinos")
+}
+
+model ReferralClick {
+  id         String   @id @default(cuid())
+  casinoId   String
+  userAgent  String?
+  ipAddress  String?
+  country    String?
+  revenue    Float?   @default(0)
+  clickedAt  DateTime @default(now())
+
+  // Relations
+  casino Casino @relation(fields: [casinoId], references: [id])
+
+  @@map("referral_clicks")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
