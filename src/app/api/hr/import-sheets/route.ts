@@ -17,7 +17,7 @@ function getGoogleAuth(accessToken: string) {
   return oauth2Client
 }
 
-async function getCurrentExchangeRate() {
+async function getCurrentExchangeRate(): Promise<number> {
   try {
     // You can implement real exchange rate API here
     // For now, return default rate
@@ -25,6 +25,22 @@ async function getCurrentExchangeRate() {
   } catch (error) {
     return 1.3 // Fallback rate
   }
+}
+
+interface WorkDataItem {
+  nickname: string
+  casino: string
+  deposit: number
+  withdrawal: number
+  card: string
+}
+
+interface TestDataItem {
+  nickname: string
+  casino: string
+  deposit: number
+  withdrawal: number
+  card: string
 }
 
 async function importFromGoogleDrive(drive: any, sheets: any, month: string, rate: number) {
@@ -47,11 +63,11 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
   console.log(`Found ${allFolders.length} total folders`)
 
   // Filter folders that start with @
-  const employeeFolders = allFolders.filter(folder => folder.name.startsWith('@'))
+  const employeeFolders = allFolders.filter((folder: any) => folder.name?.startsWith('@'))
   console.log(`Found ${employeeFolders.length} employee folders starting with @`)
 
-  const workData = []
-  const testData = []
+  const workData: WorkDataItem[] = []
+  const testData: TestDataItem[] = []
 
   // Process each employee folder (@nickname)
   for (const folder of employeeFolders) {
@@ -81,12 +97,12 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
         
         const allSpreadsheets = broadSearchResponse.data.files || []
         console.log(`Found ${allSpreadsheets.length} spreadsheets in folder:`)
-        allSpreadsheets.forEach(file => console.log(`  - "${file.name}"`))
+        allSpreadsheets.forEach((file: any) => console.log(`  - "${file.name}"`))
         
         // Filter for files that contain both WORK and the nickname
-        workFiles = allSpreadsheets.filter(file => 
-          file.name.includes('WORK') && 
-          file.name.includes(nickname.substring(1)) // Remove @ from nickname for comparison
+        workFiles = allSpreadsheets.filter((file: any) => 
+          file.name?.includes('WORK') && 
+          file.name?.includes(nickname.substring(1)) // Remove @ from nickname for comparison
         )
       }
 
@@ -101,11 +117,11 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
             fields: 'sheets.properties.title'
           })
 
-          const sheetNames = spreadsheetInfo.data.sheets?.map(sheet => sheet.properties.title) || []
+          const sheetNames = spreadsheetInfo.data.sheets?.map((sheet: any) => sheet.properties?.title) || []
           console.log(`Available sheets in "${workFile.name}":`, sheetNames)
 
           // Find the month sheet - try different variations
-          let targetSheet = null
+          let targetSheet: string | null = null
           const monthToFind = month.split(' ')[0] // Get just "August" from "August 2024"
           
           // Try exact match first
@@ -114,16 +130,16 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
           } 
           // Try case insensitive match
           else {
-            targetSheet = sheetNames.find(sheet => 
+            targetSheet = sheetNames.find((sheet: string) => 
               sheet.toLowerCase() === monthToFind.toLowerCase()
-            )
+            ) || null
           }
           
           // If still not found, try partial match
           if (!targetSheet) {
-            targetSheet = sheetNames.find(sheet => 
+            targetSheet = sheetNames.find((sheet: string) => 
               sheet.toLowerCase().includes(monthToFind.toLowerCase())
-            )
+            ) || null
           }
 
           if (targetSheet) {
@@ -175,7 +191,7 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
               }
               console.log(`✅ Added ${validRows} valid records for ${nickname}`)
               
-            } catch (readError) {
+            } catch (readError: any) {
               console.log(`❌ Error reading data from "${targetSheet}":`, readError.message)
             }
           } else {
@@ -183,13 +199,13 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
             console.log(`Available sheets: ${sheetNames.join(', ')}`)
           }
           
-        } catch (sheetListError) {
+        } catch (sheetListError: any) {
           console.log(`❌ Error getting sheet list from ${workFile.name}:`, sheetListError.message)
         }
       } else {
         console.log(`❌ No WORK file found for ${nickname}`)
       }
-    } catch (folderError) {
+    } catch (folderError: any) {
       console.log(`❌ Error processing folder ${folder.name}:`, folderError.message)
     }
   }
@@ -204,11 +220,11 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
         fields: 'sheets.properties.title'
       })
 
-      const testSheetNames = testSpreadsheetInfo.data.sheets?.map(sheet => sheet.properties.title) || []
+      const testSheetNames = testSpreadsheetInfo.data.sheets?.map((sheet: any) => sheet.properties?.title) || []
       console.log(`Available sheets in test spreadsheet:`, testSheetNames)
 
       const monthToFind = month.split(' ')[0] // "August"
-      let testTargetSheet = testSheetNames.find(sheet => 
+      let testTargetSheet = testSheetNames.find((sheet: string) => 
         sheet.toLowerCase() === monthToFind.toLowerCase() ||
         sheet.toLowerCase().includes(monthToFind.toLowerCase())
       )
@@ -256,7 +272,7 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
       } else {
         console.log(`❌ No test sheet found for month "${monthToFind}"`)
       }
-    } catch (testError) {
+    } catch (testError: any) {
       console.log('❌ Error fetching test data:', testError.message)
     }
   }
@@ -272,9 +288,9 @@ async function importFromGoogleDrive(drive: any, sheets: any, month: string, rat
 async function processAndSaveData(importResult: any, month: string) {
   const { workData, testData, rate } = importResult
   let totalProcessed = 0
-  const employees = []
-  const workRecords = []
-  const testRecords = []
+  const employees: string[] = []
+  const workRecords: any[] = []
+  const testRecords: any[] = []
 
   try {
     // Process work data
@@ -356,7 +372,7 @@ async function processAndSaveData(importResult: any, month: string) {
 
     console.log(`Successfully saved ${totalProcessed} records to database`)
 
-  } catch (dbError) {
+  } catch (dbError: any) {
     console.log('Database save error:', dbError.message)
     console.log('Continuing with demo data calculation...')
     // Continue with demo data if DB fails
@@ -425,7 +441,7 @@ export async function POST(request: NextRequest) {
     try {
       await drive.files.get({ fileId: process.env.GOOGLE_JUNIOR_FOLDER_ID! })
       console.log('Google Drive access confirmed')
-    } catch (accessError) {
+    } catch (accessError: any) {
       console.error('Google Drive access error:', accessError.message)
       return NextResponse.json({
         success: false,
@@ -468,7 +484,7 @@ ${processedData.workRecords.slice(0, 10).map(r => `${r.employee}: ${r.casino} ($
       }
     })
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error importing from Google Drive:', error)
     
     if (error.message?.includes('invalid_grant') || error.message?.includes('unauthorized')) {
@@ -551,7 +567,7 @@ export async function GET(request: NextRequest) {
           employees: employeeFolders.map(f => f.name).slice(0, 5) // First 5 for preview
         }
       })
-    } catch (apiError) {
+    } catch (apiError: any) {
       console.error('Google API test error:', apiError.message)
       return NextResponse.json({
         success: false,
@@ -565,7 +581,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-  } catch (error) {
+  } catch (error: any) {
     return NextResponse.json({
       success: false,
       error: error.message
