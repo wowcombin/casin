@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 export async function GET() {
   const clientId = process.env.GOOGLE_CLIENT_ID
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.NEXTAUTH_URL}/api/auth/google/callback`
+  const redirectUri = "https://casin.vercel.app/api/auth/google/callback"
   
   const scope = [
     'https://www.googleapis.com/auth/drive.readonly',
