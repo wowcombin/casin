@@ -321,7 +321,7 @@ export default function AdminDashboard() {
       <div className="bg-white shadow rounded-lg">
         <div className="px-4 py-5 sm:p-6">
           <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">Acțiuni Rapide</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <button 
               onClick={() => setActiveSection('casinos')}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
@@ -339,6 +339,12 @@ export default function AdminDashboard() {
               className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium"
             >
               Vezi Rapoarte
+            </button>
+            <button 
+              onClick={() => router.push('/admin/accounting')}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+            >
+              📊 Просмотр Бухгалтерии
             </button>
           </div>
         </div>
