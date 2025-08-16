@@ -1,3 +1,6 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,205 +10,95 @@ datasource db {
   url      = env("POSTGRES_PRISMA_URL")
 }
 
-model User {
-  id        String     @id @default(cuid())
-  email     String     @unique
-  name      String?
-  role      UserRole   @default(EMPLOYEE)
-  salary    Float?
-  status    UserStatus @default(ACTIVE)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-
-  casinos Casino[]
-  @@map("users")
-}
-
-model Casino {
-  id          String   @id @default(cuid())
-  name        String
-  rating      Float
-  bonus       String?
-  description String?
-  logoUrl     String?
-  referralUrl String?
-  authorId    String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  author User             @relation(fields: [authorId], references: [id])
-  clicks ReferralClick[]
-  @@map("casinos")
-}
-
-model ReferralClick {
-  id        String   @id @default(cuid())
-  casinoId  String
-  userAgent String?
-  ipAddress String?
-  country   String?
-  revenue   Float?   @default(0)
-  clickedAt DateTime @default(now())
-
-  casino Casino @relation(fields: [casinoId], references: [id])
-  @@map("referral_clicks")
-}
-
-model Newsletter {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  subscribedAt DateTime @default(now())
-  isActive     Boolean  @default(true)
-  @@map("newsletter")
-}
-
-model Partnership {
-  id          String            @id @default(cuid())
-  companyName String
-  email       String
-  website     String?
-  message     String
-  status      PartnershipStatus @default(PENDING)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  @@map("partnerships")
-}
-
-model JobApplication {
-  id        String              @id @default(cuid())
-  name      String
-  email     String
-  phone     String?
-  position  String
-  message   String
-  resumeUrl String?
-  status    ApplicationStatus   @default(PENDING)
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-  @@map("job_applications")
-}
-
 model Employee {
-  id        String       @id @default(cuid())
-  nickname  String       @unique
-  email     String?
-  role      EmployeeRole @default(JUNIOR)
-  isActive  Boolean      @default(true)
-  folderId  String?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id        Int      @id @default(autoincrement())
+  nickname  String   @unique
+  role      String   @default("JUNIOR")
+  isActive  Boolean  @default(true) @map("isActive")
+  createdAt DateTime @default(now()) @map("createdAt")
+  updatedAt DateTime @updatedAt @map("updatedAt")
 
-  workData     WorkData[]
-  profits      EmployeeProfit[]
-  testResults  TestResult[]
+  workData    WorkData[]
+  testResults TestResult[]
+
   @@map("employees")
 }
 
 model WorkData {
-  id         String   @id @default(cuid())
-  employeeId String
+  id         Int      @id @default(autoincrement())
+  employeeId Int      @map("employeeId")
   month      String
   casino     String
   deposit    Float    @default(0)
   withdrawal Float    @default(0)
   card       String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @default(now()) @map("createdAt")
 
   employee Employee @relation(fields: [employeeId], references: [id])
+
   @@map("work_data")
 }
 
 model TestResult {
-  id         String   @id @default(cuid())
-  employeeId String
+  id         Int      @id @default(autoincrement())
+  employeeId Int      @map("employeeId")
   month      String
   casino     String
   deposit    Float    @default(0)
   withdrawal Float    @default(0)
   card       String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @default(now()) @map("createdAt")
 
   employee Employee @relation(fields: [employeeId], references: [id])
+
   @@map("test_results")
 }
 
-model EmployeeProfit {
-  id         String  @id @default(cuid())
-  employeeId String
-  month      String
-  baseProfit Float   @default(0)
-  teamProfit Float   @default(0)
-  bonus      Float   @default(0)
-  totalProfit Float  @default(0)
-  createdAt  DateTime @default(now())
-
-  employee Employee @relation(fields: [employeeId], references: [id])
-  
-  @@unique([employeeId, month])
-  @@map("employee_profits")
-}
-
 model MonthlyAccounting {
-  id           String   @id @default(cuid())
-  month        String   @unique
-  gbpUsdRate   Float    @default(1.3)
-  totalBase    Float    @default(0)
-  totalSpending Float   @default(0)
-  totalProfit  Float    @default(0)
-  isProcessed  Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         Int      @id @default(autoincrement())
+  month      String   @unique
+  gbpUsdRate Float    @default(1.27) @map("gbpUsdRate")
+  createdAt  DateTime @default(now()) @map("createdAt")
+  updatedAt  DateTime @updatedAt @map("updatedAt")
+
   @@map("monthly_accounting")
 }
 
-model SiteProfit {
-  id          String   @id @default(cuid())
-  month       String
-  siteName    String
-  totalProfit Float    @default(0)
-  createdAt   DateTime @default(now())
-  @@map("site_profits")
+model Casino {
+  id        Int      @id @default(autoincrement())
+  name      String
+  rating    Float?
+  bonus     String?
+  createdAt DateTime @default(now()) @map("createdAt")
+
+  @@map("casinos")
 }
 
-model Spending {
-  id          String   @id @default(cuid())
-  month       String
-  category    String
-  amount      Float
-  description String?
-  createdAt   DateTime @default(now())
-  @@map("spending")
+model Partnership {
+  id          Int      @id @default(autoincrement())
+  companyName String   @map("companyName")
+  email       String
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now()) @map("createdAt")
+
+  @@map("partnerships")
 }
 
-enum UserRole {
-  ADMIN
-  MANAGER
-  EMPLOYEE
-  VIEWER
+model JobApplication {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  position  String
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now()) @map("createdAt")
+
+  @@map("job_applications")
 }
 
-enum UserStatus {
-  ACTIVE
-  INACTIVE
-  SUSPENDED
-}
+model Newsletter {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  subscribedAt DateTime @default(now()) @map("subscribedAt")
 
-enum PartnershipStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-enum ApplicationStatus {
-  PENDING
-  REVIEWING
-  ACCEPTED
-  REJECTED
-}
-
-enum EmployeeRole {
-  JUNIOR
-  TEAM_LEAD
-  ADMIN
-  TESTER
+  @@map("newsletters")
 }
