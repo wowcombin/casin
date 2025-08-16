@@ -1,14 +1,8 @@
-Понял, извини. Вот полный файл:
-
-## 📁 `src/app/api/hr/import-sheets/route.ts`
-
-```typescript
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '../../../../../lib/prisma'
 import { google } from 'googleapis'
 import { cookies } from 'next/headers'
 
-// Получаем OAuth клиент с токенами
 async function getAuthClient(request?: NextRequest) {
   try {
     const cookieStore = cookies()
@@ -20,11 +14,9 @@ async function getAuthClient(request?: NextRequest) {
       process.env.GOOGLE_REDIRECT_URI || `${origin}/api/auth/google/callback`
     )
 
-    // Пробуем получить токены из cookies
     const refreshToken = cookieStore.get('google_refresh_token')?.value
     const accessToken = cookieStore.get('google_access_token')?.value
 
-    // Или из переменных окружения (для продакшена)
     const tokens = {
       refresh_token: refreshToken || process.env.GOOGLE_REFRESH_TOKEN,
       access_token: accessToken || process.env.GOOGLE_ACCESS_TOKEN
@@ -79,7 +71,6 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Если авторизованы, проверяем доступ
     const drive = google.drive({ version: 'v3', auth: authResult.client })
     
     try {
@@ -119,7 +110,6 @@ export async function GET(request: NextRequest) {
     } catch (driveError: any) {
       console.error('Drive access error:', driveError)
       
-      // Если ошибка 404 - папка не найдена
       if (driveError.code === 404) {
         return NextResponse.json({
           success: false,
@@ -131,7 +121,6 @@ export async function GET(request: NextRequest) {
         })
       }
       
-      // Если ошибка 403 - нет доступа
       if (driveError.code === 403) {
         return NextResponse.json({
           success: false,
@@ -183,17 +172,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Преобразуем формат месяца для совместимости с Google Sheets
-    // "August 2025" -> "August" или наоборот
     const monthFormats = [
-      month, // Как есть (например, "August 2025")
-      month.split(' ')[0], // Только месяц (например, "August")
-      month.replace(' ', '_'), // С подчеркиванием (например, "August_2025")
+      month,
+      month.split(' ')[0],
+      month.replace(' ', '_'),
     ]
     
     console.log('Will try month formats:', monthFormats)
 
-    // Проверяем авторизацию
     const authResult = await getAuthClient(request)
     
     if (!authResult.client) {
@@ -218,10 +204,8 @@ export async function POST(request: NextRequest) {
 
     console.log(`Starting import process for month: ${month}`)
 
-    // ID папки Junior
     const juniorFolderId = '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu'
     
-    // Получаем список папок сотрудников
     console.log('Fetching employee folders...')
     const foldersResponse = await drive.files.list({
       q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
@@ -244,13 +228,11 @@ export async function POST(request: NextRequest) {
     const errors: string[] = []
     const processedEmployees: string[] = []
 
-    // Удаляем старые данные за этот месяц
     console.log('Deleting old data for month:', month)
     const deleteWorkResult = await prisma.workData.deleteMany({ where: { month } })
     const deleteTestResult = await prisma.testResult.deleteMany({ where: { month } })
     console.log(`Deleted ${deleteWorkResult.count} work records and ${deleteTestResult.count} test records`)
 
-    // Обрабатываем каждую папку сотрудника
     for (const folder of employeeFolders) {
       try {
         const folderName = folder.name || ''
@@ -263,7 +245,6 @@ export async function POST(request: NextRequest) {
 
         console.log(`Processing employee: ${nickname}`)
 
-        // Создаем или находим сотрудника
         let employee = await prisma.employee.findUnique({
           where: { nickname }
         })
@@ -279,7 +260,6 @@ export async function POST(request: NextRequest) {
           })
         }
 
-        // Ищем файл WORK @username в папке
         console.log(`Looking for WORK file in folder ${folder.id}`)
         const filesResponse = await drive.files.list({
           q: `'${folder.id}' in parents and name contains 'WORK' and mimeType='application/vnd.google-apps.spreadsheet'`,
@@ -295,13 +275,12 @@ export async function POST(request: NextRequest) {
 
         console.log(`Found WORK file: ${workFile.name} (${workFile.id})`)
 
-        // Пробуем разные форматы названия листа
         let sheetData = null
         let successfulRange = null
         
         for (const monthFormat of monthFormats) {
           try {
-            const range = `${monthFormat}!A2:D100` // A-Casino, B-Deposit, C-Withdrawal, D-Card
+            const range = `${monthFormat}!A2:D100`
             console.log(`Trying to read sheet data from range: ${range}`)
             
             const response = await sheets.spreadsheets.values.get({
@@ -332,10 +311,8 @@ export async function POST(request: NextRequest) {
         
         let employeeImportCount = 0
         for (const row of rows) {
-          // Структура из скриншота: A-Casino, B-Deposit, C-Withdrawal, D-Card
           const [casino, depositStr, withdrawalStr, card] = row
           
-          // Пропускаем пустые строки или строки без казино
           if (!casino || casino.toString().trim() === '') {
             continue
           }
@@ -343,7 +320,6 @@ export async function POST(request: NextRequest) {
           const deposit = parseFloat(depositStr) || 0
           const withdrawal = parseFloat(withdrawalStr) || 0
           
-          // Пропускаем записи где и депозит и вывод = 0
           if (deposit === 0 && withdrawal === 0) {
             continue
           }
@@ -351,7 +327,7 @@ export async function POST(request: NextRequest) {
           await prisma.workData.create({
             data: {
               employeeId: employee.id,
-              month, // Сохраняем в формате как пришло от клиента
+              month,
               casino: casino.toString().trim(),
               deposit,
               withdrawal,
@@ -376,7 +352,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Импорт тестовых данных @sobroffice (из отдельной таблицы)
     try {
       console.log('Importing test data for @sobroffice...')
       const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
@@ -396,7 +371,6 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      // Пробуем разные форматы для тестовых данных
       for (const monthFormat of monthFormats) {
         try {
           const testRange = `${monthFormat}!A2:D100`
@@ -433,7 +407,7 @@ export async function POST(request: NextRequest) {
               
               importedCount++
             }
-            break // Если успешно импортировали, выходим из цикла
+            break
           }
         } catch (testErr: any) {
           console.log(`Failed to read test range ${monthFormat}:`, testErr.message)
@@ -445,7 +419,6 @@ export async function POST(request: NextRequest) {
       errors.push(`Test data error: ${testError.message}`)
     }
 
-    // Создаем или обновляем запись MonthlyAccounting
     console.log('Updating monthly accounting...')
     await prisma.monthlyAccounting.upsert({
       where: { month },
@@ -481,4 +454,3 @@ export async function POST(request: NextRequest) {
     })
   }
 }
-```
