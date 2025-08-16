@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     })
     
     const rate = monthAccounting?.gbpUsdRate || 1.27
-    const totalSpending = 0 // Пока не используем расходы, можно добавить отдельную таблицу
+    const totalSpending = 0 // Пока не используем расходы
 
     // Получаем всех активных сотрудников с их данными за месяц
     const employees = await prisma.employee.findMany({
@@ -97,7 +97,7 @@ export async function POST(request: Request) {
         }
       }
 
-      // Обрабатываем тестовые данные (только для тех у кого они есть, обычно @sobroffice)
+      // Обрабатываем тестовые данные
       for (const testData of employee.testResults) {
         const deposit = testData.deposit || 0
         const withdrawal = testData.withdrawal || 0
@@ -164,4 +164,52 @@ export async function POST(request: Request) {
     }
     
     // Добавляем членов команды, которые не в juniors
-    for (cons
+    for (const [nickname, profit] of Object.entries(teamProfits)) {
+      if (!juniorProfitsWithBonus[nickname]) {
+        allProfits.push({
+          nickname,
+          profit: parseFloat(profit.toFixed(2))
+        })
+      }
+    }
+
+    // Сортируем по прибыли (от большей к меньшей)
+    allProfits.sort((a, b) => b.profit - a.profit)
+
+    // Результат
+    const result = {
+      month,
+      rate,
+      totalBase: parseFloat(totalBase.toFixed(2)),
+      totalProfit: parseFloat(totalProfit.toFixed(2)),
+      totalSpending,
+      employees: allProfits,
+      juniors: Object.entries(juniorProfitsWithBonus)
+        .filter(([nickname]) => employees.some(e => e.nickname === nickname))
+        .map(([nickname, profit]) => ({
+          nickname,
+          profit: parseFloat(profit.toFixed(2))
+        })),
+      team: Object.entries(team).map(([nickname, percent]) => ({
+        nickname,
+        percent: percent * 100,
+        profit: parseFloat((percent * baseForTeam).toFixed(2))
+      })),
+      message: `Расчет завершен для ${employees.length} сотрудников. Общая база: $${totalBase.toFixed(2)}, Общая прибыль: $${totalProfit.toFixed(2)}`
+    }
+
+    console.log('Profit calculation completed:', result)
+
+    return NextResponse.json({
+      success: true,
+      data: result
+    })
+
+  } catch (error: any) {
+    console.error('Error calculating profits:', error)
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    )
+  }
+}
