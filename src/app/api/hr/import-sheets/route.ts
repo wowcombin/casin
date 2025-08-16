@@ -137,8 +137,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Используем только первую часть месяца для листов Google Sheets
-    const sheetMonth = month.split(' ')[0] // "August 2025" -> "August"
+    const sheetMonth = month.split(' ')[0]
     
     const authResult = await getAuthClient(request)
     
@@ -155,7 +154,6 @@ export async function POST(request: NextRequest) {
 
     const juniorFolderId = '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu'
     
-    // Получаем список папок сотрудников
     const foldersResponse = await drive.files.list({
       q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
       fields: 'files(id, name)',
@@ -176,17 +174,24 @@ export async function POST(request: NextRequest) {
     const processedEmployees: string[] = []
     const dataToInsert: any[] = []
     const testDataToInsert: any[] = []
+    const spendingToInsert: any[] = []
 
-    // Удаляем старые данные за этот месяц
+    // Удаляем старые данные
     await prisma.workData.deleteMany({ where: { month } })
     await prisma.testResult.deleteMany({ where: { month } })
+    
+    // Удаляем старые расходы если таблица существует
+    try {
+      await prisma.monthlySpending.deleteMany({ where: { month } })
+    } catch (e) {
+      console.log('MonthlySpending table not found, skipping')
+    }
 
-    // Обрабатываем папки батчами для избежания таймаута
+    // Обрабатываем папки батчами
     const batchSize = 5
     for (let i = 0; i < employeeFolders.length; i += batchSize) {
       const batch = employeeFolders.slice(i, i + batchSize)
       
-      // Проверяем время выполнения
       if (Date.now() - startTime > 8000) {
         console.log('Approaching timeout, saving partial data')
         break
@@ -201,7 +206,6 @@ export async function POST(request: NextRequest) {
             return null
           }
 
-          // Создаем или находим сотрудника
           let employee = await prisma.employee.findUnique({
             where: { nickname }
           })
@@ -216,7 +220,6 @@ export async function POST(request: NextRequest) {
             })
           }
 
-          // Ищем файл WORK
           const filesResponse = await drive.files.list({
             q: `'${folder.id}' in parents and name contains 'WORK' and mimeType='application/vnd.google-apps.spreadsheet'`,
             fields: 'files(id, name)',
@@ -228,9 +231,8 @@ export async function POST(request: NextRequest) {
             return null
           }
 
-          // Читаем ВСЕ данные из листа (увеличиваем лимит)
           try {
-            const range = `${sheetMonth}!A2:D1000` // Увеличиваем до 1000 строк
+            const range = `${sheetMonth}!A2:D1000`
             const response = await sheets.spreadsheets.values.get({
               spreadsheetId: workFile.id!,
               range: range
@@ -277,10 +279,8 @@ export async function POST(request: NextRequest) {
         }
       })
 
-      // Ждем завершения батча
       const results = await Promise.all(batchPromises)
       
-      // Фильтруем успешные результаты
       results.forEach(result => {
         if (result) {
           processedEmployees.push(result)
@@ -288,7 +288,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Импорт тестовых данных @sobroffice
+    // Импорт тестовых данных
     try {
       const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
       
@@ -306,7 +306,7 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      const testRange = `${sheetMonth}!A2:D1000` // Увеличиваем лимит
+      const testRange = `${sheetMonth}!A2:D1000`
       const testData = await sheets.spreadsheets.values.get({
         spreadsheetId: testSpreadsheetId,
         range: testRange
@@ -337,11 +337,11 @@ export async function POST(request: NextRequest) {
       console.log('Could not import test data:', testError.message)
     }
 
-    // Импорт расходов из таблицы Accounting
+    // Импорт расходов
     let totalSpending = 0
     try {
       const accountingSpreadsheetId = '19LmZTOzZoX8eMhGPazMl9g_VPmOZ3YwMURWqcrvKkAU'
-      const spendingRange = `${sheetMonth} Spending!A2:B100`
+      const spendingRange = `${sheetMonth} Spending!A2:C100`
       
       console.log('Importing spending data from:', spendingRange)
       
@@ -352,12 +352,19 @@ export async function POST(request: NextRequest) {
 
       if (spendingData.data.values) {
         for (const row of spendingData.data.values) {
-          const [name, costStr] = row
+          const [name, costStr, date] = row
           
           if (!name || !costStr) continue
           
           const cost = parseFloat(costStr) || 0
           totalSpending += cost
+          
+          spendingToInsert.push({
+            month,
+            name: name.toString().trim(),
+            cost,
+            date: date?.toString().trim() || null
+          })
         }
         console.log(`Total spending for ${sheetMonth}: ${totalSpending}`)
       }
@@ -380,17 +387,27 @@ export async function POST(request: NextRequest) {
       importedCount += testDataToInsert.length
     }
 
-    // Обновляем месячный учет с расходами
+    // Сохраняем расходы если таблица существует
+    if (spendingToInsert.length > 0) {
+      try {
+        await prisma.monthlySpending.createMany({
+          data: spendingToInsert
+        })
+        console.log(`Saved ${spendingToInsert.length} spending records`)
+      } catch (e) {
+        console.log('Could not save spending records:', e)
+      }
+    }
+
+    // Обновляем месячный учет БЕЗ totalSpending
     await prisma.monthlyAccounting.upsert({
       where: { month },
       update: { 
-        gbpUsdRate: 1.27,
-        totalSpending: totalSpending 
+        gbpUsdRate: 1.27
       },
       create: { 
         month, 
-        gbpUsdRate: 1.27,
-        totalSpending: totalSpending 
+        gbpUsdRate: 1.27
       }
     })
 
@@ -398,7 +415,7 @@ export async function POST(request: NextRequest) {
     console.log(`Import completed in ${executionTime}ms`)
 
     const successMessage = importedCount > 0 
-      ? `Импорт завершен! Импортировано ${importedCount} записей.\nРасходы: $${totalSpending}\n\nОбработано:\n${processedEmployees.join('\n')}`
+      ? `Импорт завершен!\n\n📊 Импортировано: ${importedCount} записей\n💰 Расходы: $${totalSpending.toFixed(2)}\n\n👥 Обработано сотрудников:\n${processedEmployees.join('\n')}`
       : `Импорт завершен. Данные не найдены для месяца "${sheetMonth}".`
     
     return NextResponse.json({
