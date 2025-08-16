@@ -51,8 +51,9 @@ export default function DataManagementPage() {
     deposit: '',
     withdrawal: '',
     card: '',
-    type: 'work' // work или test
+    type: 'work'
   })
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -73,22 +74,37 @@ export default function DataManagementPage() {
     try {
       setLoading(true)
       const response = await fetch('/api/hr/employees')
-      const result = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const text = await response.text()
+      console.log('Employees response:', text)
+      
+      if (!text) {
+        console.error('Empty response from employees API')
+        setEmployees([])
+        return
+      }
+      
+      const result = JSON.parse(text)
       
       if (result.success) {
-        setEmployees(result.data)
+        setEmployees(result.data || [])
       } else {
-        alert('Ошибка загрузки сотрудников: ' + result.error)
+        console.error('Error loading employees:', result.error)
+        setError(`Ошибка загрузки сотрудников: ${result.error}`)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading employees:', error)
-      alert('Ошибка загрузки данных')
+      setError(`Ошибка загрузки данных: ${error.message}`)
+      setEmployees([])
     } finally {
       setLoading(false)
     }
   }
 
-  // НОВАЯ ФУНКЦИЯ: Расчет прибыли за месяц
   const calculateProfitsForMonth = async (month: string) => {
     if (!month) {
       alert('Выберите месяц для расчета')
@@ -96,6 +112,8 @@ export default function DataManagementPage() {
     }
 
     setLoading(true)
+    setError(null)
+    
     try {
       const response = await fetch('/api/hr/calculate-profits', {
         method: 'POST',
@@ -103,7 +121,18 @@ export default function DataManagementPage() {
         body: JSON.stringify({ month })
       })
 
-      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const text = await response.text()
+      console.log('Calculate profits response:', text)
+      
+      if (!text) {
+        throw new Error('Пустой ответ от сервера')
+      }
+      
+      const result = JSON.parse(text)
 
       if (result.success) {
         const data = result.data
@@ -113,15 +142,19 @@ export default function DataManagementPage() {
         message += `💰 Общая база: $${data.totalBase}\n`
         message += `📊 Общая прибыль: $${data.totalProfit}\n\n`
         
-        message += `👥 Прибыль сотрудников:\n`
-        data.juniors.forEach((junior: any) => {
-          message += `• ${junior.nickname}: $${junior.profit.toFixed(2)}\n`
-        })
+        if (data.juniors && data.juniors.length > 0) {
+          message += `💥 Прибыль сотрудников:\n`
+          data.juniors.forEach((junior: any) => {
+            message += `• ${junior.nickname}: $${junior.profit.toFixed(2)}\n`
+          })
+        }
         
-        message += `\n🎯 Прибыль команды:\n`
-        data.team.forEach((member: any) => {
-          message += `• ${member.nickname}: $${member.profit.toFixed(2)}\n`
-        })
+        if (data.team && data.team.length > 0) {
+          message += `\n🎯 Прибыль команды:\n`
+          data.team.forEach((member: any) => {
+            message += `• ${member.nickname}: $${member.profit.toFixed(2)} (${member.percent}%)\n`
+          })
+        }
 
         alert(message)
       } else {
@@ -129,7 +162,7 @@ export default function DataManagementPage() {
       }
     } catch (error: any) {
       console.error('Error calculating profits:', error)
-      alert('❌ Ошибка расчета прибыли')
+      alert('❌ Ошибка расчета прибыли: ' + error.message)
     } finally {
       setLoading(false)
     }
@@ -142,6 +175,7 @@ export default function DataManagementPage() {
     }
 
     setLoading(true)
+    setError(null)
     setImportProgress({
       step: 'Начало импорта',
       current: 0,
@@ -158,22 +192,43 @@ export default function DataManagementPage() {
         message: 'Проверяем доступ к Google Drive...'
       })
 
+      console.log('Checking authorization...')
       const authResponse = await fetch('/api/hr/import-sheets')
-      const authResult = await authResponse.json()
+      
+      if (!authResponse.ok) {
+        const errorText = await authResponse.text()
+        console.error('Auth check failed:', authResponse.status, errorText)
+        throw new Error(`Ошибка авторизации: ${authResponse.status}`)
+      }
+
+      const authText = await authResponse.text()
+      console.log('Auth response text:', authText)
+      
+      if (!authText) {
+        throw new Error('Пустой ответ от сервера при проверке авторизации')
+      }
+
+      let authResult
+      try {
+        authResult = JSON.parse(authText)
+      } catch (parseError) {
+        console.error('Failed to parse auth response:', authText)
+        throw new Error('Некорректный ответ сервера')
+      }
 
       if (!authResult.success) {
         if (authResult.needsAuth) {
+          setImportProgress(null)
           const confirmAuth = window.confirm('Требуется авторизация Google Drive. Перейти к авторизации?')
           if (confirmAuth) {
             window.location.href = '/api/auth/google'
             return
           } else {
-            setImportProgress(null)
             setLoading(false)
             return
           }
         }
-        throw new Error(authResult.error)
+        throw new Error(authResult.error || 'Ошибка авторизации')
       }
 
       // Начинаем импорт
@@ -184,13 +239,33 @@ export default function DataManagementPage() {
         message: `Импортируем данные за ${selectedMonth}...`
       })
 
+      console.log('Starting import for month:', selectedMonth)
       const importResponse = await fetch('/api/hr/import-sheets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ month: selectedMonth })
       })
 
-      const importResult = await importResponse.json()
+      if (!importResponse.ok) {
+        const errorText = await importResponse.text()
+        console.error('Import failed:', importResponse.status, errorText)
+        throw new Error(`Ошибка импорта: ${importResponse.status}`)
+      }
+
+      const importText = await importResponse.text()
+      console.log('Import response text:', importText)
+      
+      if (!importText) {
+        throw new Error('Пустой ответ от сервера при импорте')
+      }
+
+      let importResult
+      try {
+        importResult = JSON.parse(importText)
+      } catch (parseError) {
+        console.error('Failed to parse import response:', importText)
+        throw new Error('Некорректный ответ сервера при импорте')
+      }
 
       setImportProgress({
         step: 'Обработка',
@@ -211,10 +286,17 @@ export default function DataManagementPage() {
         setTimeout(() => {
           setImportProgress(null)
           if (importResult.success) {
-            alert(`✅ Импорт завершен!\n\n${importResult.data.message}`)
+            alert(`✅ Импорт завершен!\n\n${importResult.data?.message || 'Данные успешно импортированы'}`)
             loadEmployees() // Перезагружаем данные
           } else {
-            alert(`❌ Ошибка импорта:\n\n${importResult.error}`)
+            if (importResult.needsAuth) {
+              const confirmAuth = window.confirm(`Требуется авторизация Google Drive.\n\nОшибка: ${importResult.error}\n\nПерейти к авторизации?`)
+              if (confirmAuth) {
+                window.location.href = '/api/auth/google'
+              }
+            } else {
+              alert(`❌ Ошибка импорта:\n\n${importResult.error}`)
+            }
           }
         }, 1000)
       }, 1000)
@@ -222,6 +304,7 @@ export default function DataManagementPage() {
     } catch (error: any) {
       console.error('Import error:', error)
       setImportProgress(null)
+      setError(`Ошибка импорта: ${error.message}`)
       alert(`❌ Ошибка импорта: ${error.message}`)
     } finally {
       setLoading(false)
@@ -236,6 +319,7 @@ export default function DataManagementPage() {
 
     try {
       setLoading(true)
+      setError(null)
 
       // Сначала создаем или находим сотрудника
       let employee = employees.find(emp => emp.nickname === newData.employeeNickname)
@@ -249,6 +333,10 @@ export default function DataManagementPage() {
             role: newData.type === 'test' ? 'TESTER' : 'JUNIOR'
           })
         })
+        
+        if (!createEmployeeResponse.ok) {
+          throw new Error('Ошибка создания сотрудника')
+        }
         
         const createEmployeeResult = await createEmployeeResponse.json()
         if (!createEmployeeResult.success) {
@@ -271,6 +359,10 @@ export default function DataManagementPage() {
           card: newData.card || 'N/A'
         })
       })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
 
       const result = await response.json()
       
@@ -316,6 +408,12 @@ export default function DataManagementPage() {
       <div className="bg-white p-6 rounded-lg shadow">
         <h3 className="text-lg font-medium text-gray-900 mb-4">Импорт из Google Drive</h3>
         
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        )}
+        
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -359,7 +457,6 @@ export default function DataManagementPage() {
               {loading ? 'Импортируем...' : '📥 Начать импорт'}
             </button>
 
-            {/* НОВАЯ КНОПКА: Рассчитать прибыль */}
             <button
               onClick={() => calculateProfitsForMonth(selectedMonth)}
               disabled={loading || !selectedMonth}
@@ -503,6 +600,12 @@ export default function DataManagementPage() {
             {loading ? 'Загрузка...' : '🔄 Обновить'}
           </button>
         </div>
+
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        )}
 
         {employees.length === 0 ? (
           <div className="text-center py-8">
