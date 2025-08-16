@@ -55,11 +55,12 @@ model TestResult {
 }
 
 model MonthlyAccounting {
-  id         Int      @id @default(autoincrement())
-  month      String   @unique
-  gbpUsdRate Float    @default(1.27) @map("gbpUsdRate")
-  createdAt  DateTime @default(now()) @map("createdAt")
-  updatedAt  DateTime @updatedAt @map("updatedAt")
+  id            Int      @id @default(autoincrement())
+  month         String   @unique
+  gbpUsdRate    Float    @default(1.27) @map("gbpUsdRate")
+  totalSpending Float    @default(0) @map("totalSpending")
+  createdAt     DateTime @default(now()) @map("createdAt")
+  updatedAt     DateTime @updatedAt @map("updatedAt")
 
   @@map("monthly_accounting")
 }
