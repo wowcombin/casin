@@ -1,431 +1,124 @@
-import { NextResponse, NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '../../../../../lib/prisma'
 import { google } from 'googleapis'
 
-// Initialize Google APIs with OAuth tokens
-function getGoogleAuth(accessToken: string) {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI
-  )
+// Конфигурация OAuth2
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/google/callback'
+)
 
-  oauth2Client.setCredentials({
-    access_token: accessToken
-  })
-
-  return oauth2Client
-}
-
-async function getCurrentExchangeRate(): Promise<number> {
+// Проверка авторизации
+async function checkAuth() {
   try {
-    // You can implement real exchange rate API here
-    // For now, return default rate
-    return 1.27
+    // Проверяем, есть ли сохраненные токены
+    const tokens = process.env.GOOGLE_REFRESH_TOKEN ? {
+      refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+      access_token: process.env.GOOGLE_ACCESS_TOKEN
+    } : null
+
+    if (!tokens || !tokens.refresh_token) {
+      return {
+        authorized: false,
+        message: 'Требуется авторизация Google Drive'
+      }
+    }
+
+    oauth2Client.setCredentials(tokens)
+    
+    // Проверяем, работает ли токен
+    const drive = google.drive({ version: 'v3', auth: oauth2Client })
+    await drive.files.list({ pageSize: 1 })
+    
+    return { authorized: true }
   } catch (error) {
-    return 1.3 // Fallback rate
-  }
-}
-
-interface WorkDataItem {
-  nickname: string
-  casino: string
-  deposit: number
-  withdrawal: number
-  card: string
-}
-
-interface TestDataItem {
-  nickname: string
-  casino: string
-  deposit: number
-  withdrawal: number
-  card: string
-}
-
-async function importFromGoogleDrive(drive: any, sheets: any, month: string, rate: number) {
-  const juniorFolderId = process.env.GOOGLE_JUNIOR_FOLDER_ID
-  const testSpreadsheetId = process.env.GOOGLE_TEST_SPREADSHEET_ID
-
-  if (!juniorFolderId) {
-    throw new Error('Junior folder ID not configured')
-  }
-
-  console.log('Fetching employee folders from Junior directory...')
-
-  // Get all subfolders in Junior folder that start with @
-  const foldersResponse = await drive.files.list({
-    q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
-    fields: 'files(id, name)'
-  })
-
-  const allFolders = foldersResponse.data.files || []
-  console.log(`Found ${allFolders.length} total folders`)
-
-  // Filter folders that start with @
-  const employeeFolders = allFolders.filter((folder: any) => folder.name?.startsWith('@'))
-  console.log(`Found ${employeeFolders.length} employee folders starting with @`)
-
-  const workData: WorkDataItem[] = []
-  const testData: TestDataItem[] = []
-
-  // Process each employee folder (@nickname)
-  for (const folder of employeeFolders) {
-    try {
-      const nickname = folder.name // e.g., @Artem_Sen
-      console.log(`\n=== Processing employee folder: ${nickname} ===`)
-
-      // Find WORK @nickname spreadsheet (exact pattern match)
-      const expectedWorkFileName = `WORK ${nickname}` // e.g., "WORK @Artem_Sen"
-      console.log(`Looking for work file: "${expectedWorkFileName}"`)
-
-      const workFilesResponse = await drive.files.list({
-        q: `'${folder.id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and name='${expectedWorkFileName}'`,
-        fields: 'files(id, name, createdTime, modifiedTime)'
-      })
-
-      let workFiles = workFilesResponse.data.files || []
-      
-      // If exact match not found, try broader search
-      if (workFiles.length === 0) {
-        console.log(`Exact match not found, searching for files containing "WORK" and "${nickname}"`)
-        
-        const broadSearchResponse = await drive.files.list({
-          q: `'${folder.id}' in parents and mimeType='application/vnd.google-apps.spreadsheet'`,
-          fields: 'files(id, name, createdTime, modifiedTime)'
-        })
-        
-        const allSpreadsheets = broadSearchResponse.data.files || []
-        console.log(`Found ${allSpreadsheets.length} spreadsheets in folder:`)
-        allSpreadsheets.forEach((file: any) => console.log(`  - "${file.name}"`))
-        
-        // Filter for files that contain both WORK and the nickname
-        workFiles = allSpreadsheets.filter((file: any) => 
-          file.name?.includes('WORK') && 
-          file.name?.includes(nickname.substring(1)) // Remove @ from nickname for comparison
-        )
-      }
-
-      if (workFiles.length > 0) {
-        const workFile = workFiles[0] // Take the first matching file
-        console.log(`✅ Found work file: "${workFile.name}" for ${nickname}`)
-
-        // Get available sheets in the work file
-        try {
-          const spreadsheetInfo = await sheets.spreadsheets.get({
-            spreadsheetId: workFile.id,
-            fields: 'sheets.properties.title'
-          })
-
-          const sheetNames = spreadsheetInfo.data.sheets?.map((sheet: any) => sheet.properties?.title) || []
-          console.log(`Available sheets in "${workFile.name}":`, sheetNames)
-
-          // Find the month sheet - try different variations
-          let targetSheet: string | null = null
-          const monthToFind = month.split(' ')[0] // Get just "August" from "August 2024"
-          
-          // Try exact match first
-          if (sheetNames.includes(monthToFind)) {
-            targetSheet = monthToFind
-          } 
-          // Try case insensitive match
-          else {
-            targetSheet = sheetNames.find((sheet: string) => 
-              sheet.toLowerCase() === monthToFind.toLowerCase()
-            ) || null
-          }
-          
-          // If still not found, try partial match
-          if (!targetSheet) {
-            targetSheet = sheetNames.find((sheet: string) => 
-              sheet.toLowerCase().includes(monthToFind.toLowerCase())
-            ) || null
-          }
-
-          if (targetSheet) {
-            console.log(`✅ Found month sheet: "${targetSheet}" in ${workFile.name}`)
-
-            try {
-              console.log(`Reading data from sheet "${targetSheet}"...`)
-              
-              const monthSheetData = await sheets.spreadsheets.values.get({
-                spreadsheetId: workFile.id,
-                range: `'${targetSheet}'!A2:D1000`
-              })
-
-              const rows = monthSheetData.data.values || []
-              console.log(`Found ${rows.length} total rows in "${targetSheet}"`)
-              
-              let validRows = 0
-              for (let i = 0; i < rows.length; i++) {
-                const row = rows[i]
-                
-                // Check if row has data (at least casino name)
-                if (row && row.length >= 1 && row[0] && row[0].toString().trim() !== '') {
-                  const casino = row[0].toString().trim()
-                  const deposit = row.length >= 2 ? (parseFloat(row[1]) || 0) : 0
-                  const withdrawal = row.length >= 3 ? (parseFloat(row[2]) || 0) : 0
-                  const card = row.length >= 4 && row[3] ? row[3].toString().trim() : 'N/A'
-
-                  // Skip header-like rows
-                  if (casino.toLowerCase() === 'casino' || 
-                      casino.toLowerCase() === 'site' ||
-                      casino.toLowerCase().includes('депозит') ||
-                      casino.toLowerCase().includes('deposit')) {
-                    continue
-                  }
-
-                  workData.push({
-                    nickname: nickname,
-                    casino: casino,
-                    deposit: deposit,
-                    withdrawal: withdrawal,
-                    card: card
-                  })
-
-                  validRows++
-                  if (validRows <= 5) { // Log first 5 records for debugging
-                    console.log(`  ➤ Row ${i + 2}: ${casino} | Deposit: ${deposit} | Withdrawal: ${withdrawal} | Card: ${card}`)
-                  }
-                }
-              }
-              console.log(`✅ Added ${validRows} valid records for ${nickname}`)
-              
-            } catch (readError: any) {
-              console.log(`❌ Error reading data from "${targetSheet}":`, readError.message)
-            }
-          } else {
-            console.log(`❌ No sheet found for month "${monthToFind}" in ${workFile.name}`)
-            console.log(`Available sheets: ${sheetNames.join(', ')}`)
-          }
-          
-        } catch (sheetListError: any) {
-          console.log(`❌ Error getting sheet list from ${workFile.name}:`, sheetListError.message)
-        }
-      } else {
-        console.log(`❌ No WORK file found for ${nickname}`)
-      }
-    } catch (folderError: any) {
-      console.log(`❌ Error processing folder ${folder.name}:`, folderError.message)
+    console.error('Auth check error:', error)
+    return {
+      authorized: false,
+      message: 'Токен недействителен, требуется повторная авторизация'
     }
   }
-
-  // Get test data from @sobroffice separate spreadsheet
-  if (testSpreadsheetId) {
-    try {
-      console.log('\n=== Fetching test data from separate spreadsheet ===')
-      
-      const testSpreadsheetInfo = await sheets.spreadsheets.get({
-        spreadsheetId: testSpreadsheetId,
-        fields: 'sheets.properties.title'
-      })
-
-      const testSheetNames = testSpreadsheetInfo.data.sheets?.map((sheet: any) => sheet.properties?.title) || []
-      console.log(`Available sheets in test spreadsheet:`, testSheetNames)
-
-      const monthToFind = month.split(' ')[0] // "August"
-      let testTargetSheet = testSheetNames.find((sheet: string) => 
-        sheet.toLowerCase() === monthToFind.toLowerCase() ||
-        sheet.toLowerCase().includes(monthToFind.toLowerCase())
-      )
-
-      if (testTargetSheet) {
-        console.log(`✅ Found test month sheet: "${testTargetSheet}"`)
-        
-        const testSheetData = await sheets.spreadsheets.values.get({
-          spreadsheetId: testSpreadsheetId,
-          range: `'${testTargetSheet}'!A2:D1000`
-        })
-
-        const testRows = testSheetData.data.values || []
-        console.log(`Found ${testRows.length} test data rows`)
-        
-        let validTestRows = 0
-        for (const row of testRows) {
-          if (row && row.length >= 1 && row[0] && row[0].toString().trim() !== '') {
-            const casino = row[0].toString().trim()
-            
-            // Skip headers
-            if (casino.toLowerCase() === 'casino' || casino.toLowerCase() === 'site') {
-              continue
-            }
-            
-            const deposit = row.length >= 2 ? (parseFloat(row[1]) || 0) : 0
-            const withdrawal = row.length >= 3 ? (parseFloat(row[2]) || 0) : 0
-            const card = row.length >= 4 && row[3] ? row[3].toString().trim() : 'N/A'
-
-            testData.push({
-              nickname: '@sobroffice',
-              casino: casino,
-              deposit: deposit,
-              withdrawal: withdrawal,
-              card: card
-            })
-
-            validTestRows++
-            if (validTestRows <= 3) {
-              console.log(`  ➤ Test record: ${casino} - ${deposit}/${withdrawal}`)
-            }
-          }
-        }
-        console.log(`✅ Added ${validTestRows} test records`)
-      } else {
-        console.log(`❌ No test sheet found for month "${monthToFind}"`)
-      }
-    } catch (testError: any) {
-      console.log('❌ Error fetching test data:', testError.message)
-    }
-  }
-
-  console.log(`\n=== Import Summary ===`)
-  console.log(`Work records: ${workData.length}`)
-  console.log(`Test records: ${testData.length}`)
-  console.log(`Total: ${workData.length + testData.length}`)
-  
-  return { workData, testData, rate }
 }
 
-async function processAndSaveData(importResult: any, month: string) {
-  const { workData, testData, rate } = importResult
-  let totalProcessed = 0
-  const employees: string[] = []
-  const workRecords: any[] = []
-  const testRecords: any[] = []
-
+export async function GET() {
   try {
-    // ВАЖНО: Сначала удаляем существующие данные за этот месяц чтобы избежать дублирования
-    console.log(`Clearing existing data for month: ${month}`)
+    const authCheck = await checkAuth()
     
-    const deletedWork = await prisma.workData.deleteMany({
-      where: { month }
-    })
-
-    const deletedTest = await prisma.testResult.deleteMany({
-      where: { month }
-    })
-
-    console.log(`Deleted ${deletedWork.count} work records and ${deletedTest.count} test records`)
-    console.log('Existing data cleared, processing new data...')
-
-    // Process work data
-    for (const work of workData) {
-      // Create or update employee
-      let employee = await prisma.employee.upsert({
-        where: { nickname: work.nickname },
-        update: { isActive: true },
-        create: {
-          nickname: work.nickname,
-          role: 'JUNIOR',
-          isActive: true
-        }
-      })
-
-      // Create work record
-      await prisma.workData.create({
+    if (!authCheck.authorized) {
+      return NextResponse.json({
+        success: false,
+        needsAuth: true,
         data: {
-          employeeId: employee.id,
-          month,
-          casino: work.casino,
-          deposit: work.deposit,
-          withdrawal: work.withdrawal,
-          card: work.card
+          status: 'not_authenticated',
+          message: authCheck.message,
+          authUrl: `/api/auth/google`
         }
       })
-
-      workRecords.push({
-        employee: work.nickname,
-        casino: work.casino,
-        profit: (work.withdrawal - work.deposit)
-      })
-      totalProcessed++
-
-      if (!employees.includes(work.nickname)) {
-        employees.push(work.nickname)
-      }
     }
 
-    // Process test data
-    for (const test of testData) {
-      let employee = await prisma.employee.upsert({
-        where: { nickname: '@sobroffice' },
-        update: { isActive: true },
-        create: {
-          nickname: '@sobroffice',
-          role: 'TESTER',
-          isActive: true
-        }
-      })
-
-      await prisma.testResult.create({
-        data: {
-          employeeId: employee.id,
-          month,
-          casino: test.casino,
-          deposit: test.deposit,
-          withdrawal: test.withdrawal,
-          card: test.card
-        }
-      })
-
-      testRecords.push({
-        casino: test.casino,
-        profit: (test.withdrawal - test.deposit)
-      })
-      totalProcessed++
-    }
-
-    // Update monthly accounting
-    await prisma.monthlyAccounting.upsert({
-      where: { month },
-      update: { gbpUsdRate: rate },
-      create: {
-        month,
-        gbpUsdRate: rate
-      }
-    })
-
-    console.log(`Successfully saved ${totalProcessed} records to database`)
-
-  } catch (dbError: any) {
-    console.log('Database save error:', dbError.message)
-    console.log('Continuing with demo data calculation...')
-    // Continue with demo data if DB fails
-    totalProcessed = workData.length + testData.length
+    // Если авторизованы, показываем информацию о доступе
+    const drive = google.drive({ version: 'v3', auth: oauth2Client })
     
-    // Create employees list from imported data
-    for (const work of workData) {
-      if (!employees.includes(work.nickname)) {
-        employees.push(work.nickname)
+    try {
+      // Пытаемся получить информацию о папке Junior
+      const juniorFolderId = '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu'
+      const folderResponse = await drive.files.get({
+        fileId: juniorFolderId,
+        fields: 'name, id'
+      })
+
+      // Получаем список папок сотрудников
+      const foldersResponse = await drive.files.list({
+        q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
+        fields: 'files(id, name)',
+        pageSize: 100
+      })
+
+      const employeeFolders = foldersResponse.data.files || []
+      const employees = employeeFolders
+        .map(f => f.name?.replace('WORK ', ''))
+        .filter(Boolean)
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          status: 'authenticated',
+          folderName: folderResponse.data.name,
+          employeeFolders: employeeFolders.length,
+          employees: employees.slice(0, 5), // Первые 5 для примера
+          message: 'Google Drive подключен успешно'
+        }
+      })
+    } catch (error: any) {
+      console.error('Drive access error:', error)
+      return NextResponse.json({
+        success: false,
+        data: {
+          status: 'authenticated',
+          message: 'Авторизован, но нет доступа к папке. Проверьте права доступа.',
+          error: error.message
+        }
+      })
+    }
+
+  } catch (error: any) {
+    console.error('Error checking Google auth:', error)
+    return NextResponse.json({
+      success: false,
+      error: error.message,
+      data: {
+        status: 'error',
+        message: 'Ошибка проверки авторизации'
       }
-      workRecords.push({
-        employee: work.nickname,
-        casino: work.casino,
-        profit: (work.withdrawal - work.deposit)
-      })
-    }
-
-    for (const test of testData) {
-      testRecords.push({
-        casino: test.casino,
-        profit: (test.withdrawal - test.deposit)
-      })
-    }
-  }
-
-  return {
-    totalProcessed,
-    employees,
-    workRecords,
-    testRecords,
-    workDataCount: workData.length,
-    testDataCount: testData.length
+    })
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const { month } = await request.json()
-    
+
     if (!month) {
       return NextResponse.json(
         { success: false, error: 'Month is required' },
@@ -433,172 +126,185 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get access token from cookies
-    const accessToken = request.cookies.get('google_access_token')?.value
-
-    if (!accessToken) {
+    // Проверяем авторизацию
+    const authCheck = await checkAuth()
+    if (!authCheck.authorized) {
       return NextResponse.json({
         success: false,
-        error: 'Google authentication required',
         needsAuth: true,
-        authUrl: '/api/auth/google'
+        error: authCheck.message
       })
     }
 
-    console.log(`Starting Google Drive import for month: ${month}`)
+    const drive = google.drive({ version: 'v3', auth: oauth2Client })
+    const sheets = google.sheets({ version: 'v4', auth: oauth2Client })
 
-    const auth = getGoogleAuth(accessToken)
-    const drive = google.drive({ version: 'v3', auth })
-    const sheets = google.sheets({ version: 'v4', auth })
+    console.log(`Starting import for month: ${month}`)
 
-    // Test API access first
+    // ID папки Junior
+    const juniorFolderId = '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu'
+    
+    // Получаем список папок сотрудников
+    const foldersResponse = await drive.files.list({
+      q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
+      fields: 'files(id, name)',
+      pageSize: 100
+    })
+
+    const employeeFolders = foldersResponse.data.files || []
+    console.log(`Found ${employeeFolders.length} employee folders`)
+
+    let importedCount = 0
+    let errorCount = 0
+    const errors: string[] = []
+
+    // Удаляем старые данные за этот месяц
+    await prisma.workData.deleteMany({ where: { month } })
+    await prisma.testResult.deleteMany({ where: { month } })
+
+    // Обрабатываем каждую папку сотрудника
+    for (const folder of employeeFolders) {
+      try {
+        const folderName = folder.name || ''
+        const nickname = folderName.replace('WORK ', '').trim()
+        
+        if (!nickname.startsWith('@')) {
+          continue
+        }
+
+        console.log(`Processing employee: ${nickname}`)
+
+        // Создаем или находим сотрудника
+        let employee = await prisma.employee.findUnique({
+          where: { nickname }
+        })
+
+        if (!employee) {
+          employee = await prisma.employee.create({
+            data: {
+              nickname,
+              role: nickname === '@sobroffice' ? 'TESTER' : 'JUNIOR',
+              isActive: true
+            }
+          })
+        }
+
+        // Ищем файл WORK @username в папке
+        const filesResponse = await drive.files.list({
+          q: `'${folder.id}' in parents and name contains 'WORK' and mimeType='application/vnd.google-apps.spreadsheet'`,
+          fields: 'files(id, name)',
+          pageSize: 10
+        })
+
+        const workFile = filesResponse.data.files?.[0]
+        if (!workFile) {
+          console.log(`No WORK file found for ${nickname}`)
+          continue
+        }
+
+        // Читаем данные из листа месяца
+        const range = `${month}!A2:D100` // A-Casino, B-Deposit, C-Withdrawal, D-Card
+        
+        try {
+          const sheetData = await sheets.spreadsheets.values.get({
+            spreadsheetId: workFile.id!,
+            range: range
+          })
+
+          const rows = sheetData.data.values || []
+          
+          for (const row of rows) {
+            const [casino, depositStr, withdrawalStr, card] = row
+            
+            if (!casino || casino === 'Unknown') continue
+            
+            const deposit = parseFloat(depositStr) || 0
+            const withdrawal = parseFloat(withdrawalStr) || 0
+            
+            await prisma.workData.create({
+              data: {
+                employeeId: employee.id,
+                month,
+                casino: casino.toString().trim(),
+                deposit,
+                withdrawal,
+                card: card?.toString().trim() || 'N/A'
+              }
+            })
+            
+            importedCount++
+          }
+        } catch (sheetError: any) {
+          console.log(`No data for ${nickname} in ${month}: ${sheetError.message}`)
+        }
+      } catch (folderError: any) {
+        errorCount++
+        errors.push(`Error processing ${folder.name}: ${folderError.message}`)
+        console.error(`Error processing folder ${folder.name}:`, folderError)
+      }
+    }
+
+    // Импорт тестовых данных @sobroffice
     try {
-      await drive.files.get({ fileId: process.env.GOOGLE_JUNIOR_FOLDER_ID! })
-      console.log('Google Drive access confirmed')
-    } catch (accessError: any) {
-      console.error('Google Drive access error:', accessError.message)
-      return NextResponse.json({
-        success: false,
-        error: 'No access to Google Drive folder. Please check permissions.',
-        needsAuth: true,
-        authUrl: '/api/auth/google'
+      const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
+      const testRange = `${month}!A2:D100`
+      
+      const testData = await sheets.spreadsheets.values.get({
+        spreadsheetId: testSpreadsheetId,
+        range: testRange
       })
+
+      const sobroffice = await prisma.employee.findUnique({
+        where: { nickname: '@sobroffice' }
+      })
+
+      if (sobroffice && testData.data.values) {
+        for (const row of testData.data.values) {
+          const [casino, depositStr, withdrawalStr, card] = row
+          
+          if (!casino || casino === 'Unknown') continue
+          
+          await prisma.testResult.create({
+            data: {
+              employeeId: sobroffice.id,
+              month,
+              casino: casino.toString().trim(),
+              deposit: parseFloat(depositStr) || 0,
+              withdrawal: parseFloat(withdrawalStr) || 0,
+              card: card?.toString().trim() || 'N/A'
+            }
+          })
+          
+          importedCount++
+        }
+      }
+    } catch (testError: any) {
+      console.log('Could not import test data:', testError.message)
     }
 
-    // Get current GBP/USD rate
-    const rate = await getCurrentExchangeRate()
-
-    // Import from Google Drive
-    const importResult = await importFromGoogleDrive(drive, sheets, month, rate)
-
-    // Process and save to database
-    const processedData = await processAndSaveData(importResult, month)
-
-    const detailedMessage = `✅ Импорт завершен для ${month}!
-
-📊 Статистика:
-• Обработано записей: ${processedData.totalProcessed}
-• Рабочих записей: ${processedData.workDataCount}
-• Тестовых записей: ${processedData.testDataCount}
-• Сотрудников: ${processedData.employees.length}
-• Курс GBP/USD: ${rate}
-
-👥 Сотрудники: ${processedData.employees.join(', ')}
-
-💰 Топ прибылей:
-${processedData.workRecords.slice(0, 10).map(r => `${r.employee}: ${r.casino} (${r.profit > 0 ? '+' : ''}${r.profit.toFixed(2)})`).join('\n')}${processedData.workRecords.length > 10 ? '\n...' : ''}`
+    // Создаем или обновляем запись MonthlyAccounting
+    await prisma.monthlyAccounting.upsert({
+      where: { month },
+      update: { gbpUsdRate: 1.27 },
+      create: { month, gbpUsdRate: 1.27 }
+    })
 
     return NextResponse.json({
       success: true,
       data: {
-        month,
-        rate,
-        ...processedData,
-        message: detailedMessage
+        message: `Импорт завершен! Импортировано ${importedCount} записей из ${employeeFolders.length} папок сотрудников.`,
+        imported: importedCount,
+        errors: errorCount,
+        errorMessages: errors.slice(0, 5) // Первые 5 ошибок
       }
     })
 
   } catch (error: any) {
-    console.error('Error importing from Google Drive:', error)
-    
-    if (error.message?.includes('invalid_grant') || error.message?.includes('unauthorized')) {
-      return NextResponse.json({
-        success: false,
-        error: 'Google authentication expired. Please re-authenticate.',
-        needsAuth: true,
-        authUrl: '/api/auth/google'
-      })
-    }
-
-    if (error.message?.includes('Folder not found') || error.message?.includes('not configured')) {
-      return NextResponse.json({
-        success: false,
-        error: 'Google Drive folder not found or not configured properly.',
-        needsSetup: true
-      })
-    }
-
-    return NextResponse.json(
-      { success: false, error: 'Import failed: ' + error.message },
-      { status: 500 }
-    )
-  }
-}
-
-// GET endpoint to check auth status
-export async function GET(request: NextRequest) {
-  try {
-    const accessToken = request.cookies.get('google_access_token')?.value
-    const hasCredentials = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
-    
-    if (!hasCredentials) {
-      return NextResponse.json({
-        success: false,
-        data: {
-          status: 'not_configured',
-          message: 'Google OAuth не настроен'
-        }
-      })
-    }
-
-    if (!accessToken) {
-      return NextResponse.json({
-        success: false,
-        data: {
-          status: 'not_authenticated',
-          message: 'Требуется авторизация Google',
-          authUrl: '/api/auth/google'
-        }
-      })
-    }
-
-    // Test API access
-    try {
-      const auth = getGoogleAuth(accessToken)
-      const drive = google.drive({ version: 'v3', auth })
-      
-      // Test folder access
-      const folderInfo = await drive.files.get({ 
-        fileId: process.env.GOOGLE_JUNIOR_FOLDER_ID!,
-        fields: 'id,name,parents'
-      })
-      
-      // Test listing folders
-      const foldersResponse = await drive.files.list({
-        q: `'${process.env.GOOGLE_JUNIOR_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder'`,
-        fields: 'files(id, name)'
-      })
-
-      const employeeFolders = foldersResponse.data.files?.filter(folder => folder.name?.startsWith('@')) || []
-      
-      return NextResponse.json({
-        success: true,
-        data: {
-          status: 'authenticated',
-          message: `Google Drive готов к работе. Найдено ${employeeFolders.length} папок сотрудников.`,
-          folderName: folderInfo.data.name,
-          employeeFolders: employeeFolders.length,
-          employees: employeeFolders.map(f => f.name).slice(0, 5) // First 5 for preview
-        }
-      })
-    } catch (apiError: any) {
-      console.error('Google API test error:', apiError.message)
-      return NextResponse.json({
-        success: false,
-        data: {
-          status: 'access_denied',
-          message: 'Нет доступа к Google Drive папке. Проверьте права доступа.',
-          needsAuth: true,
-          authUrl: '/api/auth/google',
-          error: apiError.message
-        }
-      })
-    }
-
-  } catch (error: any) {
+    console.error('Import error:', error)
     return NextResponse.json({
       success: false,
-      error: error.message
+      error: error.message,
+      needsAuth: error.message.includes('auth') || error.message.includes('token')
     })
   }
 }
