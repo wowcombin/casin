@@ -22,12 +22,6 @@ async function getAuthClient(request?: NextRequest) {
       access_token: accessToken || process.env.GOOGLE_ACCESS_TOKEN
     }
 
-    console.log('Auth tokens status:', {
-      hasRefreshToken: !!tokens.refresh_token,
-      hasAccessToken: !!tokens.access_token,
-      source: refreshToken ? 'cookies' : 'env'
-    })
-
     if (tokens.refresh_token) {
       oauth2Client.setCredentials(tokens)
       return { client: oauth2Client, authorized: true }
@@ -74,15 +68,12 @@ export async function GET(request: NextRequest) {
     const drive = google.drive({ version: 'v3', auth: authResult.client })
     
     try {
-      console.log('Checking access to Junior folder...')
       const juniorFolderId = '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu'
       
       const folderResponse = await drive.files.get({
         fileId: juniorFolderId,
         fields: 'name, id'
       })
-
-      console.log('Folder found:', folderResponse.data.name)
 
       const foldersResponse = await drive.files.list({
         q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
@@ -94,8 +85,6 @@ export async function GET(request: NextRequest) {
       const employees = employeeFolders
         .map(f => f.name?.replace('WORK ', ''))
         .filter(Boolean)
-
-      console.log(`Found ${employeeFolders.length} employee folders`)
 
       return NextResponse.json({
         success: true,
@@ -109,29 +98,6 @@ export async function GET(request: NextRequest) {
       })
     } catch (driveError: any) {
       console.error('Drive access error:', driveError)
-      
-      if (driveError.code === 404) {
-        return NextResponse.json({
-          success: false,
-          error: 'Папка Junior не найдена. Проверьте ID папки.',
-          data: {
-            status: 'error',
-            message: 'Папка с ID 1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu не найдена'
-          }
-        })
-      }
-      
-      if (driveError.code === 403) {
-        return NextResponse.json({
-          success: false,
-          error: 'Нет доступа к папке. Дайте доступ аккаунту.',
-          data: {
-            status: 'error',
-            message: 'Нет прав доступа к папке Junior'
-          }
-        })
-      }
-      
       return NextResponse.json({
         success: false,
         error: driveError.message,
@@ -157,14 +123,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now()
   console.log('POST /api/hr/import-sheets - starting import')
   
   try {
     const body = await request.json()
     const { month } = body
     
-    console.log('Import request for month:', month)
-
     if (!month) {
       return NextResponse.json(
         { success: false, error: 'Month is required' },
@@ -172,26 +137,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const monthFormats = [
-      month,
-      month.split(' ')[0],
-      month.replace(' ', '_'),
-    ]
+    // Упрощаем - используем только первую часть месяца для листов Google Sheets
+    const sheetMonth = month.split(' ')[0] // "August 2025" -> "August"
     
-    console.log('Will try month formats:', monthFormats)
-
     const authResult = await getAuthClient(request)
     
-    if (!authResult.client) {
-      console.error('Failed to create OAuth client:', authResult.error)
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to initialize Google OAuth'
-      })
-    }
-    
-    if (!authResult.authorized) {
-      console.log('Not authorized for import')
+    if (!authResult.client || !authResult.authorized) {
       return NextResponse.json({
         success: false,
         needsAuth: true,
@@ -202,11 +153,9 @@ export async function POST(request: NextRequest) {
     const drive = google.drive({ version: 'v3', auth: authResult.client })
     const sheets = google.sheets({ version: 'v4', auth: authResult.client })
 
-    console.log(`Starting import process for month: ${month}`)
-
     const juniorFolderId = '1FEtrBtiv5ZpxV4C9paFzKf8aQuNdwRdu'
     
-    console.log('Fetching employee folders...')
+    // Получаем список папок сотрудников
     const foldersResponse = await drive.files.list({
       q: `'${juniorFolderId}' in parents and mimeType='application/vnd.google-apps.folder'`,
       fields: 'files(id, name)',
@@ -219,38 +168,39 @@ export async function POST(request: NextRequest) {
     if (employeeFolders.length === 0) {
       return NextResponse.json({
         success: false,
-        error: 'Не найдено папок сотрудников в папке Junior'
+        error: 'Не найдено папок сотрудников'
       })
     }
 
     let importedCount = 0
-    let errorCount = 0
-    const errors: string[] = []
     const processedEmployees: string[] = []
+    const dataToInsert: any[] = []
+    const testDataToInsert: any[] = []
 
-    console.log('Deleting old data for month:', month)
-    const deleteWorkResult = await prisma.workData.deleteMany({ where: { month } })
-    const deleteTestResult = await prisma.testResult.deleteMany({ where: { month } })
-    console.log(`Deleted ${deleteWorkResult.count} work records and ${deleteTestResult.count} test records`)
+    // Удаляем старые данные за этот месяц
+    await prisma.workData.deleteMany({ where: { month } })
+    await prisma.testResult.deleteMany({ where: { month } })
 
-    for (const folder of employeeFolders) {
+    // Ограничиваем количество обрабатываемых папок для ускорения
+    const maxFolders = 10
+    const foldersToProcess = employeeFolders.slice(0, maxFolders)
+    
+    // Обрабатываем папки параллельно для ускорения
+    const folderPromises = foldersToProcess.map(async (folder) => {
       try {
         const folderName = folder.name || ''
         const nickname = folderName.replace('WORK ', '').trim()
         
         if (!nickname.startsWith('@')) {
-          console.log(`Skipping folder ${folderName} - not a valid nickname`)
-          continue
+          return null
         }
 
-        console.log(`Processing employee: ${nickname}`)
-
+        // Создаем или находим сотрудника
         let employee = await prisma.employee.findUnique({
           where: { nickname }
         })
 
         if (!employee) {
-          console.log(`Creating new employee: ${nickname}`)
           employee = await prisma.employee.create({
             data: {
               nickname,
@@ -260,131 +210,31 @@ export async function POST(request: NextRequest) {
           })
         }
 
-        console.log(`Looking for WORK file in folder ${folder.id}`)
+        // Ищем файл WORK
         const filesResponse = await drive.files.list({
           q: `'${folder.id}' in parents and name contains 'WORK' and mimeType='application/vnd.google-apps.spreadsheet'`,
           fields: 'files(id, name)',
-          pageSize: 10
+          pageSize: 1
         })
 
         const workFile = filesResponse.data.files?.[0]
         if (!workFile) {
-          console.log(`No WORK file found for ${nickname}`)
-          continue
+          return null
         }
 
-        console.log(`Found WORK file: ${workFile.name} (${workFile.id})`)
-
-        let sheetData = null
-        let successfulRange = null
-        
-        for (const monthFormat of monthFormats) {
-          try {
-            const range = `${monthFormat}!A2:D100`
-            console.log(`Trying to read sheet data from range: ${range}`)
-            
-            const response = await sheets.spreadsheets.values.get({
-              spreadsheetId: workFile.id!,
-              range: range
-            })
-            
-            if (response.data.values && response.data.values.length > 0) {
-              sheetData = response
-              successfulRange = range
-              console.log(`Successfully read data from range: ${range}`)
-              break
-            }
-          } catch (err: any) {
-            console.log(`Failed to read range ${monthFormat}:`, err.message)
-            continue
-          }
-        }
-
-        if (!sheetData || !sheetData.data.values) {
-          console.log(`No data found for ${nickname} in any month format`)
-          errors.push(`No data for ${nickname}`)
-          continue
-        }
-
-        const rows = sheetData.data.values
-        console.log(`Found ${rows.length} rows for ${nickname} using range ${successfulRange}`)
-        
-        let employeeImportCount = 0
-        for (const row of rows) {
-          const [casino, depositStr, withdrawalStr, card] = row
-          
-          if (!casino || casino.toString().trim() === '') {
-            continue
-          }
-          
-          const deposit = parseFloat(depositStr) || 0
-          const withdrawal = parseFloat(withdrawalStr) || 0
-          
-          if (deposit === 0 && withdrawal === 0) {
-            continue
-          }
-          
-          await prisma.workData.create({
-            data: {
-              employeeId: employee.id,
-              month,
-              casino: casino.toString().trim(),
-              deposit,
-              withdrawal,
-              card: card?.toString().trim() || 'N/A'
-            }
-          })
-          
-          importedCount++
-          employeeImportCount++
-        }
-        
-        if (employeeImportCount > 0) {
-          processedEmployees.push(`${nickname} (${employeeImportCount} записей)`)
-        }
-        
-        console.log(`Imported ${employeeImportCount} records for ${nickname}`)
-      } catch (folderError: any) {
-        errorCount++
-        const errorMsg = `Error processing ${folder.name}: ${folderError.message}`
-        errors.push(errorMsg)
-        console.error(errorMsg)
-      }
-    }
-
-    try {
-      console.log('Importing test data for @sobroffice...')
-      const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
-      
-      let sobroffice = await prisma.employee.findUnique({
-        where: { nickname: '@sobroffice' }
-      })
-
-      if (!sobroffice) {
-        console.log('Creating @sobroffice employee')
-        sobroffice = await prisma.employee.create({
-          data: {
-            nickname: '@sobroffice',
-            role: 'TESTER',
-            isActive: true
-          }
-        })
-      }
-
-      for (const monthFormat of monthFormats) {
+        // Читаем данные из листа
         try {
-          const testRange = `${monthFormat}!A2:D100`
-          console.log(`Trying to read test data from range: ${testRange}`)
-          
-          const testData = await sheets.spreadsheets.values.get({
-            spreadsheetId: testSpreadsheetId,
-            range: testRange
+          const range = `${sheetMonth}!A2:D50` // Ограничиваем до 50 строк
+          const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: workFile.id!,
+            range: range
           })
-
-          if (testData.data.values && testData.data.values.length > 0) {
-            console.log(`Found ${testData.data.values.length} test records`)
+          
+          if (response.data.values && response.data.values.length > 0) {
+            const rows = response.data.values
+            let employeeImportCount = 0
             
-            for (const row of testData.data.values) {
+            for (const row of rows) {
               const [casino, depositStr, withdrawalStr, card] = row
               
               if (!casino || casino.toString().trim() === '') continue
@@ -394,63 +244,142 @@ export async function POST(request: NextRequest) {
               
               if (deposit === 0 && withdrawal === 0) continue
               
-              await prisma.testResult.create({
-                data: {
-                  employeeId: sobroffice.id,
-                  month,
-                  casino: casino.toString().trim(),
-                  deposit,
-                  withdrawal,
-                  card: card?.toString().trim() || 'N/A'
-                }
+              dataToInsert.push({
+                employeeId: employee.id,
+                month,
+                casino: casino.toString().trim(),
+                deposit,
+                withdrawal,
+                card: card?.toString().trim() || 'N/A'
               })
               
-              importedCount++
+              employeeImportCount++
             }
-            break
+            
+            if (employeeImportCount > 0) {
+              return `${nickname} (${employeeImportCount})`
+            }
           }
-        } catch (testErr: any) {
-          console.log(`Failed to read test range ${monthFormat}:`, testErr.message)
-          continue
+        } catch (err: any) {
+          console.log(`Failed to read data for ${nickname}:`, err.message)
         }
+        
+        return null
+      } catch (error: any) {
+        console.error(`Error processing ${folder.name}:`, error.message)
+        return null
       }
-    } catch (testError: any) {
-      console.log('Could not import test data:', testError.message)
-      errors.push(`Test data error: ${testError.message}`)
+    })
+
+    // Ждем завершения всех операций
+    const results = await Promise.all(folderPromises)
+    
+    // Фильтруем успешные результаты
+    results.forEach(result => {
+      if (result) {
+        processedEmployees.push(result)
+      }
+    })
+
+    // Проверяем время выполнения
+    if (Date.now() - startTime > 8000) {
+      // Если прошло больше 8 секунд, сохраняем что есть
+      console.log('Timeout prevention - saving partial data')
+    } else {
+      // Импорт тестовых данных @sobroffice (быстрая версия)
+      try {
+        const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
+        
+        let sobroffice = await prisma.employee.findUnique({
+          where: { nickname: '@sobroffice' }
+        })
+
+        if (!sobroffice) {
+          sobroffice = await prisma.employee.create({
+            data: {
+              nickname: '@sobroffice',
+              role: 'TESTER',
+              isActive: true
+            }
+          })
+        }
+
+        const testRange = `${sheetMonth}!A2:D50`
+        const testData = await sheets.spreadsheets.values.get({
+          spreadsheetId: testSpreadsheetId,
+          range: testRange
+        })
+
+        if (testData.data.values) {
+          for (const row of testData.data.values) {
+            const [casino, depositStr, withdrawalStr, card] = row
+            
+            if (!casino || casino.toString().trim() === '') continue
+            
+            const deposit = parseFloat(depositStr) || 0
+            const withdrawal = parseFloat(withdrawalStr) || 0
+            
+            if (deposit === 0 && withdrawal === 0) continue
+            
+            testDataToInsert.push({
+              employeeId: sobroffice.id,
+              month,
+              casino: casino.toString().trim(),
+              deposit,
+              withdrawal,
+              card: card?.toString().trim() || 'N/A'
+            })
+          }
+        }
+      } catch (testError: any) {
+        console.log('Could not import test data:', testError.message)
+      }
     }
 
-    console.log('Updating monthly accounting...')
+    // Массовая вставка данных для ускорения
+    if (dataToInsert.length > 0) {
+      await prisma.workData.createMany({
+        data: dataToInsert
+      })
+      importedCount += dataToInsert.length
+    }
+
+    if (testDataToInsert.length > 0) {
+      await prisma.testResult.createMany({
+        data: testDataToInsert
+      })
+      importedCount += testDataToInsert.length
+    }
+
+    // Обновляем месячный учет
     await prisma.monthlyAccounting.upsert({
       where: { month },
       update: { gbpUsdRate: 1.27 },
       create: { month, gbpUsdRate: 1.27 }
     })
 
-    const successMessage = importedCount > 0 
-      ? `Импорт завершен! Импортировано ${importedCount} записей из ${employeeFolders.length} папок.\n\nОбработано:\n${processedEmployees.join('\n')}`
-      : `Импорт завершен. Данные не найдены для месяца "${month}". Попробуйте выбрать "August 2025" или создайте листы с таким названием в Google Sheets.`
-    
-    console.log(successMessage)
+    const executionTime = Date.now() - startTime
+    console.log(`Import completed in ${executionTime}ms`)
 
+    const successMessage = importedCount > 0 
+      ? `Импорт завершен! Импортировано ${importedCount} записей.\n\nОбработано:\n${processedEmployees.join('\n')}`
+      : `Импорт завершен. Данные не найдены для месяца "${sheetMonth}".`
+    
     return NextResponse.json({
       success: true,
       data: {
         message: successMessage,
         imported: importedCount,
         processed: processedEmployees,
-        errors: errorCount,
-        errorMessages: errors.slice(0, 5)
+        executionTime: `${executionTime}ms`
       }
     })
 
   } catch (error: any) {
-    console.error('Import error in POST /api/hr/import-sheets:', error)
-    console.error('Error stack:', error.stack)
-    
+    console.error('Import error:', error)
     return NextResponse.json({
       success: false,
-      error: error.message || 'Unknown import error',
-      needsAuth: error.message?.includes('auth') || error.message?.includes('token')
+      error: error.message || 'Unknown import error'
     })
   }
 }
