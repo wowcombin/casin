@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Упрощаем - используем только первую часть месяца для листов Google Sheets
+    // Используем только первую часть месяца для листов Google Sheets
     const sheetMonth = month.split(' ')[0] // "August 2025" -> "August"
     
     const authResult = await getAuthClient(request)
@@ -181,162 +181,191 @@ export async function POST(request: NextRequest) {
     await prisma.workData.deleteMany({ where: { month } })
     await prisma.testResult.deleteMany({ where: { month } })
 
-    // Ограничиваем количество обрабатываемых папок для ускорения
-    const maxFolders = 10
-    const foldersToProcess = employeeFolders.slice(0, maxFolders)
-    
-    // Обрабатываем папки параллельно для ускорения
-    const folderPromises = foldersToProcess.map(async (folder) => {
-      try {
-        const folderName = folder.name || ''
-        const nickname = folderName.replace('WORK ', '').trim()
-        
-        if (!nickname.startsWith('@')) {
-          return null
-        }
-
-        // Создаем или находим сотрудника
-        let employee = await prisma.employee.findUnique({
-          where: { nickname }
-        })
-
-        if (!employee) {
-          employee = await prisma.employee.create({
-            data: {
-              nickname,
-              role: nickname === '@sobroffice' ? 'TESTER' : 'JUNIOR',
-              isActive: true
-            }
-          })
-        }
-
-        // Ищем файл WORK
-        const filesResponse = await drive.files.list({
-          q: `'${folder.id}' in parents and name contains 'WORK' and mimeType='application/vnd.google-apps.spreadsheet'`,
-          fields: 'files(id, name)',
-          pageSize: 1
-        })
-
-        const workFile = filesResponse.data.files?.[0]
-        if (!workFile) {
-          return null
-        }
-
-        // Читаем данные из листа
+    // Обрабатываем папки батчами для избежания таймаута
+    const batchSize = 5
+    for (let i = 0; i < employeeFolders.length; i += batchSize) {
+      const batch = employeeFolders.slice(i, i + batchSize)
+      
+      // Проверяем время выполнения
+      if (Date.now() - startTime > 8000) {
+        console.log('Approaching timeout, saving partial data')
+        break
+      }
+      
+      const batchPromises = batch.map(async (folder) => {
         try {
-          const range = `${sheetMonth}!A2:D50` // Ограничиваем до 50 строк
-          const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: workFile.id!,
-            range: range
-          })
+          const folderName = folder.name || ''
+          const nickname = folderName.replace('WORK ', '').trim()
           
-          if (response.data.values && response.data.values.length > 0) {
-            const rows = response.data.values
-            let employeeImportCount = 0
-            
-            for (const row of rows) {
-              const [casino, depositStr, withdrawalStr, card] = row
-              
-              if (!casino || casino.toString().trim() === '') continue
-              
-              const deposit = parseFloat(depositStr) || 0
-              const withdrawal = parseFloat(withdrawalStr) || 0
-              
-              if (deposit === 0 && withdrawal === 0) continue
-              
-              dataToInsert.push({
-                employeeId: employee.id,
-                month,
-                casino: casino.toString().trim(),
-                deposit,
-                withdrawal,
-                card: card?.toString().trim() || 'N/A'
-              })
-              
-              employeeImportCount++
-            }
-            
-            if (employeeImportCount > 0) {
-              return `${nickname} (${employeeImportCount})`
-            }
+          if (!nickname.startsWith('@')) {
+            return null
           }
-        } catch (err: any) {
-          console.log(`Failed to read data for ${nickname}:`, err.message)
-        }
-        
-        return null
-      } catch (error: any) {
-        console.error(`Error processing ${folder.name}:`, error.message)
-        return null
-      }
-    })
 
-    // Ждем завершения всех операций
-    const results = await Promise.all(folderPromises)
-    
-    // Фильтруем успешные результаты
-    results.forEach(result => {
-      if (result) {
-        processedEmployees.push(result)
-      }
-    })
-
-    // Проверяем время выполнения
-    if (Date.now() - startTime > 8000) {
-      // Если прошло больше 8 секунд, сохраняем что есть
-      console.log('Timeout prevention - saving partial data')
-    } else {
-      // Импорт тестовых данных @sobroffice (быстрая версия)
-      try {
-        const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
-        
-        let sobroffice = await prisma.employee.findUnique({
-          where: { nickname: '@sobroffice' }
-        })
-
-        if (!sobroffice) {
-          sobroffice = await prisma.employee.create({
-            data: {
-              nickname: '@sobroffice',
-              role: 'TESTER',
-              isActive: true
-            }
+          // Создаем или находим сотрудника
+          let employee = await prisma.employee.findUnique({
+            where: { nickname }
           })
-        }
 
-        const testRange = `${sheetMonth}!A2:D50`
-        const testData = await sheets.spreadsheets.values.get({
-          spreadsheetId: testSpreadsheetId,
-          range: testRange
-        })
-
-        if (testData.data.values) {
-          for (const row of testData.data.values) {
-            const [casino, depositStr, withdrawalStr, card] = row
-            
-            if (!casino || casino.toString().trim() === '') continue
-            
-            const deposit = parseFloat(depositStr) || 0
-            const withdrawal = parseFloat(withdrawalStr) || 0
-            
-            if (deposit === 0 && withdrawal === 0) continue
-            
-            testDataToInsert.push({
-              employeeId: sobroffice.id,
-              month,
-              casino: casino.toString().trim(),
-              deposit,
-              withdrawal,
-              card: card?.toString().trim() || 'N/A'
+          if (!employee) {
+            employee = await prisma.employee.create({
+              data: {
+                nickname,
+                role: nickname === '@sobroffice' ? 'TESTER' : 'JUNIOR',
+                isActive: true
+              }
             })
           }
+
+          // Ищем файл WORK
+          const filesResponse = await drive.files.list({
+            q: `'${folder.id}' in parents and name contains 'WORK' and mimeType='application/vnd.google-apps.spreadsheet'`,
+            fields: 'files(id, name)',
+            pageSize: 1
+          })
+
+          const workFile = filesResponse.data.files?.[0]
+          if (!workFile) {
+            return null
+          }
+
+          // Читаем ВСЕ данные из листа (увеличиваем лимит)
+          try {
+            const range = `${sheetMonth}!A2:D1000` // Увеличиваем до 1000 строк
+            const response = await sheets.spreadsheets.values.get({
+              spreadsheetId: workFile.id!,
+              range: range
+            })
+            
+            if (response.data.values && response.data.values.length > 0) {
+              const rows = response.data.values
+              let employeeImportCount = 0
+              
+              for (const row of rows) {
+                const [casino, depositStr, withdrawalStr, card] = row
+                
+                if (!casino || casino.toString().trim() === '') continue
+                
+                const deposit = parseFloat(depositStr) || 0
+                const withdrawal = parseFloat(withdrawalStr) || 0
+                
+                if (deposit === 0 && withdrawal === 0) continue
+                
+                dataToInsert.push({
+                  employeeId: employee.id,
+                  month,
+                  casino: casino.toString().trim(),
+                  deposit,
+                  withdrawal,
+                  card: card?.toString().trim() || 'N/A'
+                })
+                
+                employeeImportCount++
+              }
+              
+              if (employeeImportCount > 0) {
+                return `${nickname} (${employeeImportCount})`
+              }
+            }
+          } catch (err: any) {
+            console.log(`Failed to read data for ${nickname}:`, err.message)
+          }
+          
+          return null
+        } catch (error: any) {
+          console.error(`Error processing ${folder.name}:`, error.message)
+          return null
         }
-      } catch (testError: any) {
-        console.log('Could not import test data:', testError.message)
-      }
+      })
+
+      // Ждем завершения батча
+      const results = await Promise.all(batchPromises)
+      
+      // Фильтруем успешные результаты
+      results.forEach(result => {
+        if (result) {
+          processedEmployees.push(result)
+        }
+      })
     }
 
-    // Массовая вставка данных для ускорения
+    // Импорт тестовых данных @sobroffice
+    try {
+      const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
+      
+      let sobroffice = await prisma.employee.findUnique({
+        where: { nickname: '@sobroffice' }
+      })
+
+      if (!sobroffice) {
+        sobroffice = await prisma.employee.create({
+          data: {
+            nickname: '@sobroffice',
+            role: 'TESTER',
+            isActive: true
+          }
+        })
+      }
+
+      const testRange = `${sheetMonth}!A2:D1000` // Увеличиваем лимит
+      const testData = await sheets.spreadsheets.values.get({
+        spreadsheetId: testSpreadsheetId,
+        range: testRange
+      })
+
+      if (testData.data.values) {
+        for (const row of testData.data.values) {
+          const [casino, depositStr, withdrawalStr, card] = row
+          
+          if (!casino || casino.toString().trim() === '') continue
+          
+          const deposit = parseFloat(depositStr) || 0
+          const withdrawal = parseFloat(withdrawalStr) || 0
+          
+          if (deposit === 0 && withdrawal === 0) continue
+          
+          testDataToInsert.push({
+            employeeId: sobroffice.id,
+            month,
+            casino: casino.toString().trim(),
+            deposit,
+            withdrawal,
+            card: card?.toString().trim() || 'N/A'
+          })
+        }
+      }
+    } catch (testError: any) {
+      console.log('Could not import test data:', testError.message)
+    }
+
+    // Импорт расходов из таблицы Accounting
+    let totalSpending = 0
+    try {
+      const accountingSpreadsheetId = '19LmZTOzZoX8eMhGPazMl9g_VPmOZ3YwMURWqcrvKkAU'
+      const spendingRange = `${sheetMonth} Spending!A2:B100`
+      
+      console.log('Importing spending data from:', spendingRange)
+      
+      const spendingData = await sheets.spreadsheets.values.get({
+        spreadsheetId: accountingSpreadsheetId,
+        range: spendingRange
+      })
+
+      if (spendingData.data.values) {
+        for (const row of spendingData.data.values) {
+          const [name, costStr] = row
+          
+          if (!name || !costStr) continue
+          
+          const cost = parseFloat(costStr) || 0
+          totalSpending += cost
+        }
+        console.log(`Total spending for ${sheetMonth}: ${totalSpending}`)
+      }
+    } catch (spendingError: any) {
+      console.log('Could not import spending data:', spendingError.message)
+    }
+
+    // Массовая вставка данных
     if (dataToInsert.length > 0) {
       await prisma.workData.createMany({
         data: dataToInsert
@@ -351,18 +380,25 @@ export async function POST(request: NextRequest) {
       importedCount += testDataToInsert.length
     }
 
-    // Обновляем месячный учет
+    // Обновляем месячный учет с расходами
     await prisma.monthlyAccounting.upsert({
       where: { month },
-      update: { gbpUsdRate: 1.27 },
-      create: { month, gbpUsdRate: 1.27 }
+      update: { 
+        gbpUsdRate: 1.27,
+        totalSpending: totalSpending 
+      },
+      create: { 
+        month, 
+        gbpUsdRate: 1.27,
+        totalSpending: totalSpending 
+      }
     })
 
     const executionTime = Date.now() - startTime
     console.log(`Import completed in ${executionTime}ms`)
 
     const successMessage = importedCount > 0 
-      ? `Импорт завершен! Импортировано ${importedCount} записей.\n\nОбработано:\n${processedEmployees.join('\n')}`
+      ? `Импорт завершен! Импортировано ${importedCount} записей.\nРасходы: $${totalSpending}\n\nОбработано:\n${processedEmployees.join('\n')}`
       : `Импорт завершен. Данные не найдены для месяца "${sheetMonth}".`
     
     return NextResponse.json({
@@ -370,6 +406,7 @@ export async function POST(request: NextRequest) {
       data: {
         message: successMessage,
         imported: importedCount,
+        spending: totalSpending,
         processed: processedEmployees,
         executionTime: `${executionTime}ms`
       }
