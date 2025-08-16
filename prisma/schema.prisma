@@ -88,7 +88,9 @@ model JobApplication {
   id        Int      @id @default(autoincrement())
   name      String
   email     String
+  phone     String?
   position  String
+  message   String?
   status    String   @default("PENDING")
   createdAt DateTime @default(now()) @map("createdAt")
 
