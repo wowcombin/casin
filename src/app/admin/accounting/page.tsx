@@ -2,11 +2,47 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+interface AccountingData {
+  month: string
+  rate: number
+  workData: Array<{
+    nickname: string
+    casino: string
+    card: string
+    deposit: number
+    withdrawal: number
+    calculation: number
+  }>
+  testData: Array<{
+    nickname: string
+    casino: string
+    card: string
+    deposit: number
+    withdrawal: number
+    calculation: number
+  }>
+  siteProfits: Array<{
+    site: string
+    profit: number
+  }>
+  employeeProfits: Array<{
+    nickname: string
+    profit: number
+  }>
+  totalProfit: number
+  stats: {
+    totalRecords: number
+    totalEmployees: number
+    totalSites: number
+  }
+}
+
 export default function AccountingPage() {
   const [loading, setLoading] = useState(true)
   const [selectedMonth, setSelectedMonth] = useState('')
-  const [accountingData, setAccountingData] = useState(null)
+  const [accountingData, setAccountingData] = useState<AccountingData | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -27,18 +63,72 @@ export default function AccountingPage() {
     if (!month) return
 
     setLoading(true)
+    setError(null)
+    
     try {
+      console.log(`Loading data for month: ${month}`)
       const response = await fetch(`/api/hr/monthly-data?month=${encodeURIComponent(month)}`)
       const result = await response.json()
+
+      console.log('API Response:', result)
 
       if (result.success) {
         setAccountingData(result.data)
       } else {
-        alert('Ошибка загрузки данных: ' + result.error)
+        console.log('API error:', result.error)
+        setError(`Ошибка API: ${result.error}`)
+        
+        // Показываем пустые данные
+        setAccountingData({
+          month,
+          rate: 1.27,
+          workData: [],
+          testData: [],
+          siteProfits: [],
+          employeeProfits: [],
+          totalProfit: 0,
+          stats: { totalRecords: 0, totalEmployees: 0, totalSites: 0 }
+        })
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading data:', error)
-      alert('Ошибка загрузки данных')
+      setError(`Ошибка загрузки: ${error.message}`)
+      
+      // Показываем демо данные при ошибке
+      setAccountingData({
+        month,
+        rate: 1.27,
+        workData: [
+          { 
+            nickname: '@demo_user', 
+            casino: 'Demo Casino', 
+            card: '****1234', 
+            deposit: 100, 
+            withdrawal: 150, 
+            calculation: 6.35 
+          }
+        ],
+        testData: [
+          { 
+            nickname: '@sobroffice', 
+            casino: 'Test Casino', 
+            card: '****5678', 
+            deposit: 50, 
+            withdrawal: 75, 
+            calculation: 3.18 
+          }
+        ],
+        siteProfits: [
+          { site: 'Demo Casino', profit: 63.5 },
+          { site: 'Test Casino', profit: 31.8 }
+        ],
+        employeeProfits: [
+          { nickname: '@demo_user', profit: 206.35 },
+          { nickname: '@sobroffice', profit: 203.18 }
+        ],
+        totalProfit: 95.3,
+        stats: { totalRecords: 2, totalEmployees: 2, totalSites: 2 }
+      })
     } finally {
       setLoading(false)
     }
@@ -64,29 +154,50 @@ export default function AccountingPage() {
   }
 
   const renderOverview = () => (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-      <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-2">Общая прибыль</h3>
-        <p className="text-3xl font-bold text-green-600">
-          ${accountingData?.totalProfit?.toFixed(2) || '0.00'}
-        </p>
-        <p className="text-sm text-gray-500">Курс: {accountingData?.rate}</p>
-      </div>
+    <div>
+      {error && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-6">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <span className="text-yellow-400">⚠️</span>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-yellow-800">
+                База данных недоступна
+              </h3>
+              <div className="mt-2 text-sm text-yellow-700">
+                <p>{error}</p>
+                <p className="mt-1">Показаны демо данные для тестирования интерфейса.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
-      <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-2">Сотрудников</h3>
-        <p className="text-3xl font-bold text-blue-600">
-          {accountingData?.stats?.totalEmployees || 0}
-        </p>
-        <p className="text-sm text-gray-500">Активных</p>
-      </div>
-      
-      <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-2">Казино</h3>
-        <p className="text-3xl font-bold text-purple-600">
-          {accountingData?.stats?.totalSites || 0}
-        </p>
-        <p className="text-sm text-gray-500">Всего записей: {accountingData?.stats?.totalRecords || 0}</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Общая прибыль</h3>
+          <p className="text-3xl font-bold text-green-600">
+            ${accountingData?.totalProfit?.toFixed(2) || '0.00'}
+          </p>
+          <p className="text-sm text-gray-500">Курс: {accountingData?.rate}</p>
+        </div>
+        
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Сотрудников</h3>
+          <p className="text-3xl font-bold text-blue-600">
+            {accountingData?.stats?.totalEmployees || 0}
+          </p>
+          <p className="text-sm text-gray-500">Активных</p>
+        </div>
+        
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Казино</h3>
+          <p className="text-3xl font-bold text-purple-600">
+            {accountingData?.stats?.totalSites || 0}
+          </p>
+          <p className="text-sm text-gray-500">Всего записей: {accountingData?.stats?.totalRecords || 0}</p>
+        </div>
       </div>
     </div>
   )
@@ -97,6 +208,15 @@ export default function AccountingPage() {
         <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
           Все записи за {selectedMonth}
         </h3>
+        
+        {error && (
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-blue-700">
+              📊 Демо данные - база данных недоступна
+            </p>
+          </div>
+        )}
+        
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -130,6 +250,13 @@ export default function AccountingPage() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{row.calculation.toFixed(2)}</td>
                 </tr>
               ))}
+              {(!accountingData?.workData?.length && !accountingData?.testData?.length) && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                    Нет данных за выбранный месяц
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -143,6 +270,15 @@ export default function AccountingPage() {
         <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
           Прибыль по сайтам
         </h3>
+        
+        {error && (
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-blue-700">
+              📊 Демо данные - база данных недоступна
+            </p>
+          </div>
+        )}
+        
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -153,19 +289,28 @@ export default function AccountingPage() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {accountingData?.siteProfits?.map((site, index) => (
-                <tr key={index} className={site.profit < 0 ? 'bg-red-50' : site.profit > 1000 ? 'bg-green-50' : ''}>
+                <tr key={index} className={site.profit < 0 ? 'bg-red-50' : site.profit > 50 ? 'bg-green-50' : ''}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{site.site}</td>
                   <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${site.profit < 0 ? 'text-red-600' : 'text-green-600'}`}>
                     {site.profit.toFixed(2)}
                   </td>
                 </tr>
               ))}
-              <tr className="bg-gray-100 font-bold">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">Total Profit Across All Sites</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
-                  {accountingData?.totalProfit?.toFixed(2)}
-                </td>
-              </tr>
+              {accountingData?.siteProfits && accountingData.siteProfits.length > 0 && (
+                <tr className="bg-gray-100 font-bold">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">Total Profit Across All Sites</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
+                    {accountingData?.totalProfit?.toFixed(2)}
+                  </td>
+                </tr>
+              )}
+              {(!accountingData?.siteProfits?.length) && (
+                <tr>
+                  <td colSpan={2} className="px-6 py-4 text-center text-sm text-gray-500">
+                    Нет данных по сайтам за выбранный месяц
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -179,6 +324,15 @@ export default function AccountingPage() {
         <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
           Прибыль сотрудников
         </h3>
+        
+        {error && (
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-blue-700">
+              📊 Демо данные - база данных недоступна
+            </p>
+          </div>
+        )}
+        
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -196,6 +350,13 @@ export default function AccountingPage() {
                   </td>
                 </tr>
               ))}
+              {(!accountingData?.employeeProfits?.length) && (
+                <tr>
+                  <td colSpan={2} className="px-6 py-4 text-center text-sm text-gray-500">
+                    Нет данных по сотрудникам за выбранный месяц
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
