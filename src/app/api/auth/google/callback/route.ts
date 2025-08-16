@@ -1,70 +1,70 @@
-import { NextResponse, NextRequest } from 'next/server'
-
-export const dynamic = 'force-dynamic'
+import { NextRequest, NextResponse } from 'next/server'
+import { google } from 'googleapis'
 
 export async function GET(request: NextRequest) {
   try {
-    const url = new URL(request.url)
-    const code = url.searchParams.get('code')
-    const error = url.searchParams.get('error')
-
-    const baseUrl = "https://casin.vercel.app"
+    const searchParams = request.nextUrl.searchParams
+    const code = searchParams.get('code')
+    const error = searchParams.get('error')
 
     if (error) {
-      return NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_error=${error}`)
+      console.error('OAuth error:', error)
+      return NextResponse.redirect(
+        `${request.nextUrl.origin}/admin/data-management?error=auth_failed`
+      )
     }
 
     if (!code) {
-      return NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_error=no_code`)
+      return NextResponse.redirect(
+        `${request.nextUrl.origin}/admin/data-management?error=no_code`
+      )
     }
 
-    console.log('Exchanging OAuth code for tokens...')
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI || `${request.nextUrl.origin}/api/auth/google/callback`
+    )
 
-    // Exchange code for tokens
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: process.env.GOOGLE_CLIENT_ID!,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-        code,
-        grant_type: 'authorization_code',
-        redirect_uri: `${baseUrl}/api/auth/google/callback`
-      })
-    })
-
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text()
-      console.error('Token exchange failed:', errorText)
-      return NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_error=token_exchange_failed`)
-    }
-
-    const tokens = await tokenResponse.json()
-    console.log('OAuth tokens received successfully')
-
-    // Store tokens
-    const response = NextResponse.redirect(`${baseUrl}/admin/dashboard?auth_success=true`)
+    // Получаем токены
+    const { tokens } = await oauth2Client.getToken(code)
     
-    response.cookies.set('google_access_token', tokens.access_token, {
-      httpOnly: true,
-      secure: true,
-      maxAge: tokens.expires_in || 3600,
-      sameSite: 'lax'
+    console.log('Received tokens:', {
+      access_token: tokens.access_token ? 'present' : 'missing',
+      refresh_token: tokens.refresh_token ? 'present' : 'missing',
+      expiry_date: tokens.expiry_date
     })
+
+    // Сохраняем токены в cookies (временное решение)
+    // В продакшене лучше сохранять в базе данных
+    const response = NextResponse.redirect(
+      `${request.nextUrl.origin}/admin/data-management?auth=success`
+    )
 
     if (tokens.refresh_token) {
       response.cookies.set('google_refresh_token', tokens.refresh_token, {
         httpOnly: true,
         secure: true,
-        maxAge: 60 * 60 * 24 * 30,
-        sameSite: 'lax'
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 30 // 30 дней
+      })
+    }
+
+    if (tokens.access_token) {
+      response.cookies.set('google_access_token', tokens.access_token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: tokens.expiry_date ? Math.floor((tokens.expiry_date - Date.now()) / 1000) : 3600
       })
     }
 
     return response
 
-  } catch (error) {
-    console.error('OAuth callback error:', error)
-    return NextResponse.redirect(`https://casin.vercel.app/admin/dashboard?auth_error=callback_failed`)
+  } catch (error: any) {
+    console.error('Callback error:', error)
+    return NextResponse.redirect(
+      `${request.nextUrl.origin}/admin/data-management?error=${encodeURIComponent(error.message)}`
+    )
   }
 }
