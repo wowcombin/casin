@@ -329,22 +329,22 @@ export default function AdminDashboard() {
               Gestionează Cazinouri
             </button>
             <button 
-              onClick={() => setActiveSection('users')}
+              onClick={() => router.push('/admin/data-management')}
               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
             >
-              Gestionează Utilizatori
-            </button>
-            <button 
-              onClick={() => setActiveSection('reports')}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-            >
-              Vezi Rapoarte
+              🗄️ Управление данными
             </button>
             <button 
               onClick={() => router.push('/admin/accounting')}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium"
             >
               📊 Просмотр Бухгалтерии
+            </button>
+            <button 
+              onClick={() => setActiveSection('reports')}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+            >
+              Vezi Rapoarte
             </button>
           </div>
         </div>
