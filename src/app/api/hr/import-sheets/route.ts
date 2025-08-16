@@ -1,3 +1,8 @@
+Понял, извини. Вот полный файл:
+
+## 📁 `src/app/api/hr/import-sheets/route.ts`
+
+```typescript
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '../../../../../lib/prisma'
 import { google } from 'googleapis'
@@ -178,6 +183,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Преобразуем формат месяца для совместимости с Google Sheets
+    // "August 2025" -> "August" или наоборот
+    const monthFormats = [
+      month, // Как есть (например, "August 2025")
+      month.split(' ')[0], // Только месяц (например, "August")
+      month.replace(' ', '_'), // С подчеркиванием (например, "August_2025")
+    ]
+    
+    console.log('Will try month formats:', monthFormats)
+
     // Проверяем авторизацию
     const authResult = await getAuthClient(request)
     
@@ -227,6 +242,7 @@ export async function POST(request: NextRequest) {
     let importedCount = 0
     let errorCount = 0
     const errors: string[] = []
+    const processedEmployees: string[] = []
 
     // Удаляем старые данные за этот месяц
     console.log('Deleting old data for month:', month)
@@ -279,44 +295,79 @@ export async function POST(request: NextRequest) {
 
         console.log(`Found WORK file: ${workFile.name} (${workFile.id})`)
 
-        // Читаем данные из листа месяца
-        const range = `${month}!A2:D100` // A-Casino, B-Deposit, C-Withdrawal, D-Card
+        // Пробуем разные форматы названия листа
+        let sheetData = null
+        let successfulRange = null
         
-        try {
-          console.log(`Reading sheet data from range: ${range}`)
-          const sheetData = await sheets.spreadsheets.values.get({
-            spreadsheetId: workFile.id!,
-            range: range
-          })
-
-          const rows = sheetData.data.values || []
-          console.log(`Found ${rows.length} rows for ${nickname}`)
-          
-          for (const row of rows) {
-            const [casino, depositStr, withdrawalStr, card] = row
+        for (const monthFormat of monthFormats) {
+          try {
+            const range = `${monthFormat}!A2:D100` // A-Casino, B-Deposit, C-Withdrawal, D-Card
+            console.log(`Trying to read sheet data from range: ${range}`)
             
-            if (!casino || casino === 'Unknown') continue
-            
-            const deposit = parseFloat(depositStr) || 0
-            const withdrawal = parseFloat(withdrawalStr) || 0
-            
-            await prisma.workData.create({
-              data: {
-                employeeId: employee.id,
-                month,
-                casino: casino.toString().trim(),
-                deposit,
-                withdrawal,
-                card: card?.toString().trim() || 'N/A'
-              }
+            const response = await sheets.spreadsheets.values.get({
+              spreadsheetId: workFile.id!,
+              range: range
             })
             
-            importedCount++
+            if (response.data.values && response.data.values.length > 0) {
+              sheetData = response
+              successfulRange = range
+              console.log(`Successfully read data from range: ${range}`)
+              break
+            }
+          } catch (err: any) {
+            console.log(`Failed to read range ${monthFormat}:`, err.message)
+            continue
           }
-          console.log(`Imported ${rows.length} records for ${nickname}`)
-        } catch (sheetError: any) {
-          console.log(`No data or error for ${nickname} in ${month}:`, sheetError.message)
         }
+
+        if (!sheetData || !sheetData.data.values) {
+          console.log(`No data found for ${nickname} in any month format`)
+          errors.push(`No data for ${nickname}`)
+          continue
+        }
+
+        const rows = sheetData.data.values
+        console.log(`Found ${rows.length} rows for ${nickname} using range ${successfulRange}`)
+        
+        let employeeImportCount = 0
+        for (const row of rows) {
+          // Структура из скриншота: A-Casino, B-Deposit, C-Withdrawal, D-Card
+          const [casino, depositStr, withdrawalStr, card] = row
+          
+          // Пропускаем пустые строки или строки без казино
+          if (!casino || casino.toString().trim() === '') {
+            continue
+          }
+          
+          const deposit = parseFloat(depositStr) || 0
+          const withdrawal = parseFloat(withdrawalStr) || 0
+          
+          // Пропускаем записи где и депозит и вывод = 0
+          if (deposit === 0 && withdrawal === 0) {
+            continue
+          }
+          
+          await prisma.workData.create({
+            data: {
+              employeeId: employee.id,
+              month, // Сохраняем в формате как пришло от клиента
+              casino: casino.toString().trim(),
+              deposit,
+              withdrawal,
+              card: card?.toString().trim() || 'N/A'
+            }
+          })
+          
+          importedCount++
+          employeeImportCount++
+        }
+        
+        if (employeeImportCount > 0) {
+          processedEmployees.push(`${nickname} (${employeeImportCount} записей)`)
+        }
+        
+        console.log(`Imported ${employeeImportCount} records for ${nickname}`)
       } catch (folderError: any) {
         errorCount++
         const errorMsg = `Error processing ${folder.name}: ${folderError.message}`
@@ -325,17 +376,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Импорт тестовых данных @sobroffice
+    // Импорт тестовых данных @sobroffice (из отдельной таблицы)
     try {
       console.log('Importing test data for @sobroffice...')
       const testSpreadsheetId = '1i0IbJgxn7WwNH7T7VmOKz_xkH0GMfyGgpKKJqEmQqvA'
-      const testRange = `${month}!A2:D100`
       
-      const testData = await sheets.spreadsheets.values.get({
-        spreadsheetId: testSpreadsheetId,
-        range: testRange
-      })
-
       let sobroffice = await prisma.employee.findUnique({
         where: { nickname: '@sobroffice' }
       })
@@ -351,25 +396,48 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      if (testData.data.values) {
-        console.log(`Found ${testData.data.values.length} test records`)
-        for (const row of testData.data.values) {
-          const [casino, depositStr, withdrawalStr, card] = row
+      // Пробуем разные форматы для тестовых данных
+      for (const monthFormat of monthFormats) {
+        try {
+          const testRange = `${monthFormat}!A2:D100`
+          console.log(`Trying to read test data from range: ${testRange}`)
           
-          if (!casino || casino === 'Unknown') continue
-          
-          await prisma.testResult.create({
-            data: {
-              employeeId: sobroffice.id,
-              month,
-              casino: casino.toString().trim(),
-              deposit: parseFloat(depositStr) || 0,
-              withdrawal: parseFloat(withdrawalStr) || 0,
-              card: card?.toString().trim() || 'N/A'
-            }
+          const testData = await sheets.spreadsheets.values.get({
+            spreadsheetId: testSpreadsheetId,
+            range: testRange
           })
-          
-          importedCount++
+
+          if (testData.data.values && testData.data.values.length > 0) {
+            console.log(`Found ${testData.data.values.length} test records`)
+            
+            for (const row of testData.data.values) {
+              const [casino, depositStr, withdrawalStr, card] = row
+              
+              if (!casino || casino.toString().trim() === '') continue
+              
+              const deposit = parseFloat(depositStr) || 0
+              const withdrawal = parseFloat(withdrawalStr) || 0
+              
+              if (deposit === 0 && withdrawal === 0) continue
+              
+              await prisma.testResult.create({
+                data: {
+                  employeeId: sobroffice.id,
+                  month,
+                  casino: casino.toString().trim(),
+                  deposit,
+                  withdrawal,
+                  card: card?.toString().trim() || 'N/A'
+                }
+              })
+              
+              importedCount++
+            }
+            break // Если успешно импортировали, выходим из цикла
+          }
+        } catch (testErr: any) {
+          console.log(`Failed to read test range ${monthFormat}:`, testErr.message)
+          continue
         }
       }
     } catch (testError: any) {
@@ -385,7 +453,10 @@ export async function POST(request: NextRequest) {
       create: { month, gbpUsdRate: 1.27 }
     })
 
-    const successMessage = `Импорт завершен! Импортировано ${importedCount} записей из ${employeeFolders.length} папок сотрудников.`
+    const successMessage = importedCount > 0 
+      ? `Импорт завершен! Импортировано ${importedCount} записей из ${employeeFolders.length} папок.\n\nОбработано:\n${processedEmployees.join('\n')}`
+      : `Импорт завершен. Данные не найдены для месяца "${month}". Попробуйте выбрать "August 2025" или создайте листы с таким названием в Google Sheets.`
+    
     console.log(successMessage)
 
     return NextResponse.json({
@@ -393,6 +464,7 @@ export async function POST(request: NextRequest) {
       data: {
         message: successMessage,
         imported: importedCount,
+        processed: processedEmployees,
         errors: errorCount,
         errorMessages: errors.slice(0, 5)
       }
@@ -409,3 +481,4 @@ export async function POST(request: NextRequest) {
     })
   }
 }
+```
