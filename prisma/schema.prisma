@@ -65,6 +65,17 @@ model MonthlyAccounting {
   @@map("monthly_accounting")
 }
 
+model MonthlySpending {
+  id        Int      @id @default(autoincrement())
+  month     String
+  name      String
+  cost      Float
+  date      String?
+  createdAt DateTime @default(now()) @map("createdAt")
+
+  @@map("monthly_spending")
+}
+
 model Casino {
   id        Int      @id @default(autoincrement())
   name      String
