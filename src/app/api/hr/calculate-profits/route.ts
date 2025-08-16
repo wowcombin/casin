@@ -1,7 +1,21 @@
-import { NextResponse, NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '../../../../../lib/prisma'
 
-export async function POST(request: NextRequest) {
+// Команда менеджеров и их проценты (как в Google Sheets скрипте)
+const TEAM_PERCENTAGES = {
+  '@i88jU': 0.05,      // 5%
+  '@n1mbo': 0.10,      // 10%
+  '@sobroffice': 0.10, // 10%
+  '@zvr1903': 0.05     // 5%
+}
+
+async function getCurrentExchangeRate(): Promise<number> {
+  // В реальной версии можно подключить API курса валют
+  // Пока возвращаем курс по умолчанию как в скрипте
+  return 1.3
+}
+
+export async function POST(request: Request) {
   try {
     const { month } = await request.json()
     
@@ -12,108 +26,166 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Team configuration (same as your Google Script)
-    const team = {
-      '@i88jU': 0.05,
-      '@n1mbo': 0.10,
-      '@sobroffice': 0.10,
-      '@zvr1903': 0.05
-    }
+    console.log(`Calculating profits for month: ${month}`)
 
-    // Get current GBP/USD rate (demo version)
-    const rate = 1.3 // You can implement real API call here
+    // Получаем текущий курс GBP/USD
+    const rate = await getCurrentExchangeRate()
 
-    console.log(`Calculating profits for ${month} with rate ${rate}`)
+    // Получаем все рабочие данные за месяц
+    const workData = await prisma.workData.findMany({
+      where: { month },
+      include: { employee: true }
+    })
 
-    // Demo calculation (since DB tables don't exist yet)
-    const demoWorkData = [
-      { employee: '@opporenno', casino: 'Royal Casino', deposit: 1000, withdrawal: 1200, card: 'Card1' },
-      { employee: '@sobroffice', casino: 'Lucky Spin', deposit: 500, withdrawal: 750, card: 'Card2' }
-    ]
+    // Получаем тестовые данные за месяц
+    const testData = await prisma.testResult.findMany({
+      where: { month },
+      include: { employee: true }
+    })
 
-    const demoTestResults = [
-      { employee: '@sobroffice', casino: 'Test Casino', deposit: 300, withdrawal: 450, card: 'TestCard' }
-    ]
+    console.log(`Found ${workData.length} work records and ${testData.length} test records`)
 
-    // Calculate profits
-    const juniorProfits: { [key: string]: number } = {}
-    let totalBase = 0
+    // Инициализация переменных
     let totalProfit = 0
-    const totalSpending = 0 // Demo value
+    let totalBase = 0
+    const juniorProfits: Record<string, number> = {}
+    const juniors: string[] = []
+    const testedSites = new Set<string>()
 
-    // Process work data
-    for (const work of demoWorkData) {
-      const base = (work.withdrawal - work.deposit) * rate * 0.97
-      const calculation = base * 0.1 // 10% profit
-      
-      totalBase += base
-      totalProfit += calculation
-
-      const nickname = work.employee
-      if (!juniorProfits[nickname]) {
-        juniorProfits[nickname] = 0
+    // Собираем уникальных сотрудников (juniors)
+    workData.forEach(work => {
+      if (!juniors.includes(work.employee.nickname)) {
+        juniors.push(work.employee.nickname)
       }
-      juniorProfits[nickname] += calculation
-    }
+    })
 
-    // Add test results for @sobroffice
-    for (const test of demoTestResults) {
-      const testCalculation = (test.withdrawal - test.deposit) * rate * 0.97 * 0.1
+    // Определяем протестированные @sobroffice сайты
+    workData.forEach(work => {
+      if (work.employee.nickname === '@sobroffice' && work.casino) {
+        testedSites.add(work.casino)
+      }
+    })
+
+    console.log(`Juniors: ${juniors.join(', ')}`)
+    console.log(`Tested sites by @sobroffice: ${Array.from(testedSites).join(', ')}`)
+
+    // Расчет прибыли для juniors из рабочих данных
+    workData.forEach(work => {
+      const deposit = work.deposit || 0
+      const withdrawal = work.withdrawal || 0
+      const nickname = work.employee.nickname
+
+      // Формула как в Google Sheets: (withdrawal - deposit) * rate * 0.97 * 0.1
+      const calculation = (withdrawal - deposit) * rate * 0.97 * 0.1 // 10% profit
+      const base = (withdrawal - deposit) * rate * 0.97
+
+      totalProfit += calculation
+      totalBase += base
+
+      // Накапливаем прибыль для juniors
+      if (juniors.includes(nickname)) {
+        if (!juniorProfits[nickname]) {
+          juniorProfits[nickname] = 0
+        }
+        juniorProfits[nickname] += calculation
+
+        // Для @sobroffice добавляем 10% от базового профита протестированных сайтов
+        if (nickname === '@sobroffice' && testedSites.has(work.casino)) {
+          juniorProfits[nickname] += base * 0.1 // 10% от базового профита
+        }
+      }
+    })
+
+    // Добавляем прибыль от тестов для @sobroffice
+    testData.forEach(test => {
+      const deposit = test.deposit || 0
+      const withdrawal = test.withdrawal || 0
+      const testCalculation = (withdrawal - deposit) * rate * 0.97 * 0.1 // 10% от тестов
+
       if (!juniorProfits['@sobroffice']) {
         juniorProfits['@sobroffice'] = 0
       }
       juniorProfits['@sobroffice'] += testCalculation
-    }
-
-    // Apply bonus (if profit > 200, add 200 bonus)
-    for (const nickname in juniorProfits) {
-      if (juniorProfits[nickname] > 200) {
-        juniorProfits[nickname] += 200
-      }
-    }
-
-    // Calculate team profits
-    const isExceedSpending = totalSpending > 0.25 * totalBase
-    const baseForTeam = isExceedSpending ? totalBase - totalSpending : totalBase
-
-    const teamProfits: { [key: string]: number } = {}
-    for (const [member, percent] of Object.entries(team)) {
-      teamProfits[member] = percent * baseForTeam
-    }
-
-    // Sum team profit for @sobroffice
-    if (teamProfits['@sobroffice']) {
-      if (!juniorProfits['@sobroffice']) {
-        juniorProfits['@sobroffice'] = 0
-      }
-      juniorProfits['@sobroffice'] += teamProfits['@sobroffice']
-    }
-
-    console.log('Calculation completed:', {
-      juniorProfits,
-      teamProfits,
-      totalBase,
-      totalProfit
     })
+
+    // Добавляем бонус +200 для juniors с прибылью > 200
+    const juniorResults: Array<{nickname: string, profit: number}> = []
+    Object.keys(juniorProfits).forEach(nickname => {
+      let profit = juniorProfits[nickname]
+      if (profit > 200) {
+        profit += 200 // Бонус как в скрипте
+      }
+      juniorResults.push({ nickname, profit })
+    })
+
+    // Расчет прибыли команды (менеджеров)
+    // TODO: В будущем можно добавить учет расходов из таблицы Spending
+    const totalSpending = 0 // Пока нет данных о расходах
+    const isExceed = totalSpending > 0.25 * totalBase
+    const baseForTeam = isExceed ? totalBase - totalSpending : totalBase
+
+    const teamResults: Array<{nickname: string, profit: number}> = []
+    Object.keys(TEAM_PERCENTAGES).forEach(member => {
+      const percent = TEAM_PERCENTAGES[member]
+      const memberProfit = percent * baseForTeam
+
+      teamResults.push({ nickname: member, profit: memberProfit })
+
+      // Для @sobroffice добавляем его долю от команды к существующей прибыли
+      if (member === '@sobroffice') {
+        const sobrofficeIndex = juniorResults.findIndex(j => j.nickname === '@sobroffice')
+        if (sobrofficeIndex >= 0) {
+          juniorResults[sobrofficeIndex].profit += memberProfit
+        } else {
+          juniorResults.push({ nickname: '@sobroffice', profit: memberProfit })
+        }
+      }
+    })
+
+    // Сохраняем месячную отчетность
+    await prisma.monthlyAccounting.upsert({
+      where: { month },
+      update: { gbpUsdRate: rate },
+      create: {
+        month,
+        gbpUsdRate: rate
+      }
+    })
+
+    const results = {
+      month,
+      rate,
+      totalBase: totalBase.toFixed(2),
+      totalProfit: totalProfit.toFixed(2),
+      juniors: juniorResults,
+      team: teamResults,
+      summary: {
+        workRecords: workData.length,
+        testRecords: testData.length,
+        totalEmployees: juniors.length,
+        teamMembers: Object.keys(TEAM_PERCENTAGES).length
+      }
+    }
+
+    console.log('Calculation results:', results)
+
+    const message = `Расчет завершен для ${month}:
+• Курс GBP/USD: ${rate}
+• Общая база: $${totalBase.toFixed(2)}
+• Общая прибыль: $${totalProfit.toFixed(2)}
+• Обработано записей: ${workData.length + testData.length}
+• Сотрудников: ${juniors.length}
+• Команда: ${Object.keys(TEAM_PERCENTAGES).length}`
 
     return NextResponse.json({
       success: true,
-      data: {
-        month,
-        rate,
-        totalBase: Math.round(totalBase * 100) / 100,
-        totalSpending,
-        totalProfit: Math.round(totalProfit * 100) / 100,
-        juniorProfits,
-        teamProfits,
-        message: 'Расчет выполнен успешно (демо данные)'
-      }
+      data: { ...results, message }
     })
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error calculating profits:', error)
     return NextResponse.json(
-      { success: false, error: 'Error calculating profits: ' + error.message },
+      { success: false, error: error.message },
       { status: 500 }
     )
   }
