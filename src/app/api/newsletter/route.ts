@@ -1,39 +1,31 @@
-import { NextResponse, NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '../../../../lib/prisma'
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const { email } = await request.json()
 
-    if (!email || !email.includes('@')) {
+    if (!email) {
       return NextResponse.json(
-        { success: false, error: 'Email invalid' },
+        { success: false, error: 'Email is required' },
         { status: 400 }
       )
     }
 
-    // Încercăm să salvăm în baza de date
-    try {
-      await prisma.newsletter.create({
-        data: {
-          email: email.toLowerCase().trim(),
-          subscribedAt: new Date()
-        }
-      })
-    } catch (dbError) {
-      // Dacă BD nu e disponibilă, doar returnăm succes pentru demo
-      console.log('Newsletter signup (demo mode):', email)
-    }
+    const newsletter = await prisma.newsletter.create({
+      data: {
+        email: email.toLowerCase().trim()
+      }
+    })
 
     return NextResponse.json({
       success: true,
-      message: 'Te-ai înscris cu succes!'
+      data: newsletter
     })
-
-  } catch (error) {
-    console.error('Newsletter signup error:', error)
+  } catch (error: any) {
+    console.error('Error subscribing to newsletter:', error)
     return NextResponse.json(
-      { success: false, error: 'Eroare la înscriere' },
+      { success: false, error: error.message },
       { status: 500 }
     )
   }
