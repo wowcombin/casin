@@ -1,4 +1,4 @@
-import { NextResponse, NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '../../../../../lib/prisma'
 
 export async function GET() {
@@ -9,57 +9,30 @@ export async function GET() {
           orderBy: { createdAt: 'desc' },
           take: 5 // Last 5 records
         },
-        profits: {
-          orderBy: { createdAt: 'desc' },
-          take: 3 // Last 3 months
-        },
         testResults: {
           orderBy: { createdAt: 'desc' },
-          take: 5
+          take: 3 // Last 3 records
         }
       },
-      orderBy: { nickname: 'asc' }
+      orderBy: { createdAt: 'desc' }
     })
 
     return NextResponse.json({
       success: true,
       data: employees
     })
-
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching employees:', error)
-    
-    // Demo data if DB not available
-    const demoEmployees = [
-      {
-        id: '1',
-        nickname: '@opporenno',
-        role: 'JUNIOR',
-        isActive: true,
-        profits: [{ month: 'December', totalProfit: 850.50 }],
-        workData: [{ casino: 'Royal Casino', deposit: 1000, withdrawal: 1200 }]
-      },
-      {
-        id: '2', 
-        nickname: '@sobroffice',
-        role: 'TESTER',
-        isActive: true,
-        profits: [{ month: 'December', totalProfit: 1250.75 }],
-        testResults: [{ casino: 'Lucky Spin', deposit: 500, withdrawal: 750 }]
-      }
-    ]
-
-    return NextResponse.json({
-      success: true,
-      data: demoEmployees,
-      fallback: true
-    })
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    )
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const { nickname, email, role, folderId } = await request.json()
+    const { nickname, role } = await request.json()
 
     if (!nickname) {
       return NextResponse.json(
@@ -68,12 +41,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check if employee already exists
+    const existingEmployee = await prisma.employee.findUnique({
+      where: { nickname: nickname.trim() }
+    })
+
+    if (existingEmployee) {
+      return NextResponse.json(
+        { success: false, error: 'Employee with this nickname already exists' },
+        { status: 400 }
+      )
+    }
+
     const employee = await prisma.employee.create({
       data: {
         nickname: nickname.trim(),
-        email: email?.trim() || null,
-        role: role || 'JUNIOR',
-        folderId: folderId?.trim() || null
+        role: role?.trim() || 'JUNIOR',
+        isActive: true
       }
     })
 
@@ -81,11 +65,92 @@ export async function POST(request: NextRequest) {
       success: true,
       data: employee
     })
-
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating employee:', error)
     return NextResponse.json(
-      { success: false, error: 'Error creating employee' },
+      { success: false, error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const { id, nickname, role, isActive } = await request.json()
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Employee ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const employee = await prisma.employee.update({
+      where: { id: parseInt(id) },
+      data: {
+        ...(nickname && { nickname: nickname.trim() }),
+        ...(role && { role: role.trim() }),
+        ...(typeof isActive === 'boolean' && { isActive })
+      }
+    })
+
+    return NextResponse.json({
+      success: true,
+      data: employee
+    })
+  } catch (error: any) {
+    console.error('Error updating employee:', error)
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get('id')
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Employee ID is required' },
+        { status: 400 }
+      )
+    }
+
+    // Check if employee has work data
+    const workDataCount = await prisma.workData.count({
+      where: { employeeId: parseInt(id) }
+    })
+
+    if (workDataCount > 0) {
+      // Just deactivate instead of delete
+      const employee = await prisma.employee.update({
+        where: { id: parseInt(id) },
+        data: { isActive: false }
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: 'Employee deactivated (has work data)',
+        data: employee
+      })
+    }
+
+    // Delete if no work data
+    await prisma.employee.delete({
+      where: { id: parseInt(id) }
+    })
+
+    return NextResponse.json({
+      success: true,
+      message: 'Employee deleted successfully'
+    })
+  } catch (error: any) {
+    console.error('Error deleting employee:', error)
+    return NextResponse.json(
+      { success: false, error: error.message },
       { status: 500 }
     )
   }
