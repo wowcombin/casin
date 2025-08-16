@@ -293,6 +293,20 @@ async function processAndSaveData(importResult: any, month: string) {
   const testRecords: any[] = []
 
   try {
+    // ВАЖНО: Сначала удаляем существующие данные за этот месяц чтобы избежать дублирования
+    console.log(`Clearing existing data for month: ${month}`)
+    
+    const deletedWork = await prisma.workData.deleteMany({
+      where: { month }
+    })
+
+    const deletedTest = await prisma.testResult.deleteMany({
+      where: { month }
+    })
+
+    console.log(`Deleted ${deletedWork.count} work records and ${deletedTest.count} test records`)
+    console.log('Existing data cleared, processing new data...')
+
     // Process work data
     for (const work of workData) {
       // Create or update employee
@@ -463,15 +477,15 @@ export async function POST(request: NextRequest) {
     const detailedMessage = `✅ Импорт завершен для ${month}!
 
 📊 Статистика:
-- Обработано записей: ${processedData.totalProcessed}
-- Рабочих записей: ${processedData.workDataCount}
-- Тестовых записей: ${processedData.testDataCount}
-- Сотрудников: ${processedData.employees.length}
-- Курс GBP/USD: ${rate}
+• Обработано записей: ${processedData.totalProcessed}
+• Рабочих записей: ${processedData.workDataCount}
+• Тестовых записей: ${processedData.testDataCount}
+• Сотрудников: ${processedData.employees.length}
+• Курс GBP/USD: ${rate}
 
 👥 Сотрудники: ${processedData.employees.join(', ')}
 
-💰 Прибыли по сотрудникам:
+💰 Топ прибылей:
 ${processedData.workRecords.slice(0, 10).map(r => `${r.employee}: ${r.casino} (${r.profit > 0 ? '+' : ''}${r.profit.toFixed(2)})`).join('\n')}${processedData.workRecords.length > 10 ? '\n...' : ''}`
 
     return NextResponse.json({
