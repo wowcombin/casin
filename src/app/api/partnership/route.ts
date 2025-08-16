@@ -1,55 +1,33 @@
-import { NextResponse, NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '../../../../lib/prisma'
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const { companyName, email, website, message } = await request.json()
+    const { companyName, email, message } = await request.json()
 
-    // Валидация
-    if (!companyName || !email || !message) {
+    if (!companyName || !email) {
       return NextResponse.json(
-        { success: false, error: 'Toate câmpurile obligatorii trebuie completate' },
+        { success: false, error: 'Company name and email are required' },
         { status: 400 }
       )
     }
 
-    if (!email.includes('@')) {
-      return NextResponse.json(
-        { success: false, error: 'Email invalid' },
-        { status: 400 }
-      )
-    }
-
-    // Salvăm în baza de date
-    try {
-      await prisma.partnership.create({
-        data: {
-          companyName: companyName.trim(),
-          email: email.toLowerCase().trim(),
-          website: website?.trim() || null,
-          message: message.trim(),
-          status: 'PENDING'
-        }
-      })
-    } catch (dbError) {
-      // Dacă BD nu e disponibilă, doar loggăm pentru demo
-      console.log('Partnership application (demo mode):', {
-        companyName,
-        email,
-        website,
-        message
-      })
-    }
+    const partnership = await prisma.partnership.create({
+      data: {
+        companyName: companyName.trim(),
+        email: email.toLowerCase().trim(),
+        status: 'PENDING'
+      }
+    })
 
     return NextResponse.json({
       success: true,
-      message: 'Cererea ta a fost trimisă cu succes!'
+      data: partnership
     })
-
-  } catch (error) {
-    console.error('Partnership application error:', error)
+  } catch (error: any) {
+    console.error('Error creating partnership:', error)
     return NextResponse.json(
-      { success: false, error: 'Eroare la trimiterea cererii' },
+      { success: false, error: error.message },
       { status: 500 }
     )
   }
