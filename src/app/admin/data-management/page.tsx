@@ -88,6 +88,53 @@ export default function DataManagementPage() {
     }
   }
 
+  // НОВАЯ ФУНКЦИЯ: Расчет прибыли за месяц
+  const calculateProfitsForMonth = async (month: string) => {
+    if (!month) {
+      alert('Выберите месяц для расчета')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch('/api/hr/calculate-profits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month })
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        const data = result.data
+        let message = `✅ Расчет прибыли завершен!\n\n`
+        message += `📅 Месяц: ${data.month}\n`
+        message += `💱 Курс: ${data.rate}\n`
+        message += `💰 Общая база: $${data.totalBase}\n`
+        message += `📊 Общая прибыль: $${data.totalProfit}\n\n`
+        
+        message += `👥 Прибыль сотрудников:\n`
+        data.juniors.forEach((junior: any) => {
+          message += `• ${junior.nickname}: $${junior.profit.toFixed(2)}\n`
+        })
+        
+        message += `\n🎯 Прибыль команды:\n`
+        data.team.forEach((member: any) => {
+          message += `• ${member.nickname}: $${member.profit.toFixed(2)}\n`
+        })
+
+        alert(message)
+      } else {
+        alert('❌ Ошибка расчета: ' + result.error)
+      }
+    } catch (error: any) {
+      console.error('Error calculating profits:', error)
+      alert('❌ Ошибка расчета прибыли')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const startImport = async () => {
     if (!selectedMonth) {
       alert('Выберите месяц для импорта')
@@ -303,13 +350,24 @@ export default function DataManagementPage() {
             </div>
           )}
 
-          <button
-            onClick={startImport}
-            disabled={loading || !selectedMonth}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium disabled:opacity-50"
-          >
-            {loading ? 'Импортируем...' : '📥 Начать импорт'}
-          </button>
+          <div className="flex space-x-4">
+            <button
+              onClick={startImport}
+              disabled={loading || !selectedMonth}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium disabled:opacity-50"
+            >
+              {loading ? 'Импортируем...' : '📥 Начать импорт'}
+            </button>
+
+            {/* НОВАЯ КНОПКА: Рассчитать прибыль */}
+            <button
+              onClick={() => calculateProfitsForMonth(selectedMonth)}
+              disabled={loading || !selectedMonth}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-md font-medium disabled:opacity-50"
+            >
+              {loading ? 'Считаем...' : '🧮 Рассчитать прибыль'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
